@@ -179,7 +179,10 @@ def print_news_keyword_candidates(candidates):
 
 
 def print_news_keyword_selection_insert_result(result):
-    """Print duplicate status, final selected keyword, and insert result."""
+    """설명: DB 중복 상태, 최종 선택 키워드, insert 결과를 콘솔에 출력합니다.
+    입력: result는 키워드 선택/insert 처리 결과 딕셔너리입니다.
+    출력: 콘솔에 내용을 출력하고 None을 반환합니다.
+    """
     print("news_keyword_db_status:")
     for index, candidate in enumerate(result["checked_candidates"], start=1):
         status = "duplicate" if candidate.get("exists_in_db") else "new"
@@ -206,7 +209,28 @@ def send_news_keyword_candidates_to_telegram(candidates, use_test_chat=False):
     입력: candidates는 후보 목록, use_test_chat은 테스트 채팅방 사용 여부입니다.
     출력: 전송에 성공하면 None을 반환하고, 설정 또는 네트워크 오류가 있으면 예외를 전파합니다.
     """
-    message = format_news_keyword_candidates_message(candidates)
+    send_telegram_message(
+        format_news_keyword_candidates_message(candidates),
+        use_test_chat=use_test_chat,
+    )
+
+
+def send_selected_news_keyword_to_telegram(selected_candidate, use_test_chat=False):
+    """설명: 최종 선정된 뉴스 키워드 1개를 텔레그램 메시지로 전송합니다.
+    입력: selected_candidate는 keyword, source_title, source_url, selection_reason 값을 가진 최종 후보입니다.
+    출력: 전송에 성공하면 None을 반환하고, 설정 또는 네트워크 오류가 있으면 예외를 전파합니다.
+    """
+    send_telegram_message(
+        format_selected_news_keyword_message(selected_candidate),
+        use_test_chat=use_test_chat,
+    )
+
+
+def send_telegram_message(message, use_test_chat=False):
+    """설명: 완성된 Telegram HTML 메시지를 기본 또는 테스트 채팅방으로 전송합니다.
+    입력: message는 Telegram HTML 메시지 문자열, use_test_chat은 테스트 채팅방 사용 여부입니다.
+    출력: 전송에 성공하면 None을 반환하고, 설정 또는 네트워크 오류가 있으면 예외를 전파합니다.
+    """
     telegram = TelegramUtil()
     if use_test_chat:
         telegram.send_test_message(message)
@@ -234,6 +258,29 @@ def format_news_keyword_candidates_message(candidates):
     return "\n\n".join(lines)
 
 
+def format_selected_news_keyword_message(selected_candidate):
+    """설명: 최종 선정된 뉴스 키워드를 Telegram HTML 메시지 문자열로 변환합니다.
+    입력: selected_candidate는 keyword, source_title, source_url, selection_reason 값을 가진 후보 딕셔너리입니다.
+    출력: Telegram parse_mode=html에 사용할 최종 선정 키워드 메시지 문자열을 반환합니다.
+    """
+    keyword = html.escape(selected_candidate["keyword"])
+    source_title = html.escape(selected_candidate.get("source_title", ""))
+    selection_reason = html.escape(
+        selected_candidate.get("selection_reason")
+        or selected_candidate.get("reason", "")
+    )
+    source_url = html.escape(selected_candidate["source_url"], quote=True)
+    return "\n".join(
+        [
+            "<b>최종 경제 키워드</b>",
+            f"키워드: <b>{keyword}</b>",
+            f"원본 제목: {source_title}",
+            f"선정 사유: {selection_reason}",
+            f"원본 링크: <a href=\"{source_url}\">원문 보기</a>",
+        ]
+    )
+
+
 def main(argv=None):
     """설명: CLI 진입점으로 환경 로드, 키워드 추출, 출력, 선택적 텔레그램 전송을 수행합니다.
     입력: argv는 선택 CLI 인자 리스트이며, None이면 sys.argv 값을 사용합니다.
@@ -250,20 +297,27 @@ def main(argv=None):
         llm_client = create_llm_client(args.llm_provider)
         candidates = suggest_news_keyword_candidates(args, output_dir, llm_client)
         print_news_keyword_candidates(candidates)
+        selection_result = None
         if args.select_keyword_and_insert:
-            result = run_news_keyword_selection_insert_process(
+            selection_result = run_news_keyword_selection_insert_process(
                 candidates=candidates,
                 args=args,
                 root_dir=root_dir,
                 output_dir=output_dir,
                 llm_client=llm_client,
             )
-            print_news_keyword_selection_insert_result(result)
+            print_news_keyword_selection_insert_result(selection_result)
         if args.send_telegram:
-            send_news_keyword_candidates_to_telegram(
-                candidates,
-                use_test_chat=args.telegram_test,
-            )
+            if selection_result is None:
+                send_news_keyword_candidates_to_telegram(
+                    candidates,
+                    use_test_chat=args.telegram_test,
+                )
+            else:
+                send_selected_news_keyword_to_telegram(
+                    selection_result["selected_candidate"],
+                    use_test_chat=args.telegram_test,
+                )
             print("telegram_sent: true")
         return 0
     except (FileNotFoundError, ValueError, RuntimeError, MySQLError) as exc:

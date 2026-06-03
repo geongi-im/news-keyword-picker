@@ -4,8 +4,14 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from main import extract_news_keyword_candidates, parse_args
+from main import (
+    extract_news_keyword_candidates,
+    format_selected_news_keyword_message,
+    main as run_main,
+    parse_args,
+)
 
 
 class FakeLLMClient:
@@ -32,6 +38,65 @@ class MainLLMFlowTest(unittest.TestCase):
         args = parse_args([])
 
         self.assertIsNone(args.llm_provider)
+
+    def test_format_selected_news_keyword_message_includes_selected_fields(self):
+        selected = {
+            "keyword": "ETF",
+            "source_title": "ETF & IPO <title>",
+            "source_url": 'https://example.com/a?x=1&name="ETF"',
+            "reason": "candidate reason",
+            "selection_reason": "selection & reason <safe>",
+        }
+
+        message = format_selected_news_keyword_message(selected)
+
+        self.assertIn("<b>최종 경제 키워드</b>", message)
+        self.assertIn("키워드: <b>ETF</b>", message)
+        self.assertIn("원본 제목: ETF &amp; IPO &lt;title&gt;", message)
+        self.assertIn("선정 사유: selection &amp; reason &lt;safe&gt;", message)
+        self.assertIn(
+            "원본 링크: "
+            '<a href="https://example.com/a?x=1&amp;name=&quot;ETF&quot;">원문 보기</a>',
+            message,
+        )
+
+    def test_main_sends_selected_keyword_when_selection_is_enabled(self):
+        candidates = [
+            {
+                "keyword": "ETF",
+                "source_title": "ETF title",
+                "source_url": "https://example.com/a",
+                "reason": "candidate reason",
+            }
+        ]
+        selected = {
+            **candidates[0],
+            "selection_reason": "selection reason",
+        }
+        selection_result = {
+            "checked_candidates": candidates,
+            "eligible_candidates": candidates,
+            "selected_candidate": selected,
+            "target_date": "2026-06-02",
+            "insert_result": [],
+        }
+
+        with (
+            patch("main.load_dotenv"),
+            patch("main.create_llm_client", return_value=SimpleNamespace(default_model="test")),
+            patch("main.suggest_news_keyword_candidates", return_value=candidates),
+            patch("main.print_news_keyword_candidates"),
+            patch("main.run_news_keyword_selection_insert_process", return_value=selection_result),
+            patch("main.print_news_keyword_selection_insert_result"),
+            patch("main.send_news_keyword_candidates_to_telegram") as send_candidates,
+            patch("main.send_selected_news_keyword_to_telegram") as send_selected,
+            redirect_stdout(StringIO()),
+        ):
+            exit_code = run_main(["--send-telegram", "--select-keyword-and-insert"])
+
+        self.assertEqual(exit_code, 0)
+        send_candidates.assert_not_called()
+        send_selected.assert_called_once_with(selected, use_test_chat=False)
 
     def test_extract_news_keyword_candidates_retries_with_injected_llm_client(self):
         articles = [

@@ -28,6 +28,8 @@ python src/main.py --send-telegram
 python src/main.py --send-telegram --telegram-test
 ```
 
+`--select-keyword-and-insert`와 함께 사용하면 후보 5개 대신 최종 선정 키워드 1개의 키워드, 원본 제목, 선정 사유, 원본 링크를 전송합니다.
+
 MySQL 중복 검사 후 최종 키워드 1개를 insert:
 
 ```powershell
@@ -56,7 +58,7 @@ python -m unittest discover -s tests
 --news-keyword-model  키워드 후보 추출에 사용할 LLM 모델입니다. 기본값: codex=gpt-5.4-mini, gemini=gemini-3.5-flash
 --news-keyword-url    기본 3개 경제지 대신 단일 네이버 신문보기 URL을 수집합니다.
 --news-title-limit    LLM에 전달할 기사 제목 개수 상한입니다. 기본값: 30
---send-telegram       추출한 키워드 후보를 텔레그램으로 전송합니다.
+--send-telegram       추출한 키워드 후보 또는 최종 선정 키워드를 텔레그램으로 전송합니다.
 --telegram-test       TELEGRAM_CHAT_ID 대신 TELEGRAM_CHAT_TEST_ID로 전송합니다.
 --output-dir          LLM 임시 출력 파일 디렉토리입니다. 기본값: output
 --select-keyword-and-insert
