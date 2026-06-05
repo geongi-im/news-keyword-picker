@@ -7,12 +7,15 @@ from unittest.mock import patch
 
 from keyword_selection import (
     build_keyword_exists_query,
+    build_selected_news_quiz_insert_params,
     build_selected_news_keyword_insert_params,
+    insert_selected_news_quiz,
     insert_selected_news_keyword,
     mark_news_keyword_duplicates,
     parse_selected_viral_keyword_candidate,
     quote_mysql_identifier,
     resolve_news_keyword_storage_config,
+    run_news_keyword_selection_process,
     select_viral_news_keyword_candidate,
 )
 
@@ -102,6 +105,14 @@ class KeywordSelectionTest(unittest.TestCase):
                 "source_title": "ETF title",
                 "source_url": "https://example.com/a",
                 "reason": "candidate reason",
+                "keyword_description": "LLM ETF ??살구",
+                "quiz": {
+                    "question": "LLM ETF 筌욌뜄揆",
+                    "option_a": "LLM ?醫뤾문 A",
+                    "option_b": "LLM ?醫뤾문 B",
+                    "answer": "A",
+                    "explanation": "LLM ?醫뤾문 A揶쎛 筌띿쉶????곸???낅빍??",
+                },
             },
             {
                 "keyword": "IPO",
@@ -190,6 +201,150 @@ class KeywordSelectionTest(unittest.TestCase):
         self.assertEqual(params["category"], "3초퀴즈")
         self.assertEqual(params["target_date"], "2026-06-01")
 
+    def test_build_news_quiz_insert_params_serializes_readable_korean_json(self):
+        params = build_selected_news_quiz_insert_params(
+            {
+                "keyword": "금리",
+                "source_name": "서울경제",
+                "source_title": "금리 인하 기대 커졌다",
+                "source_url": "https://example.com/a",
+                "reason": "후보 사유",
+                "selection_reason": "선정 사유",
+                "keyword_description": "금리는 돈을 빌리는 비용이라 소비와 투자 흐름을 함께 바꿀 수 있어요.",
+                "quiz": {
+                    "question": "금리가 내려갈 때 더 타당한 해석은 무엇일까요?",
+                    "option_a": "대출 부담이 줄어 소비와 투자가 늘 가능성이 있어요.",
+                    "option_b": "예금 매력이 줄어도 기업 투자와는 별 관련이 없어요.",
+                    "answer": "A",
+                    "explanation": "금리 하락은 자금 조달 비용을 낮춰 소비와 투자 판단에 영향을 줄 수 있어요.",
+                },
+            },
+            target_date="2026-06-06",
+        )
+
+        self.assertEqual(params["mq_news_date"], "2026-06-06")
+        self.assertEqual(params["mq_company"], "서울경제")
+        self.assertEqual(params["mq_keyword"], "금리")
+        self.assertIn("금리가 내려갈 때", params["mq_quiz_content"])
+        self.assertNotIn("\\u", params["mq_quiz_content"])
+        self.assertEqual(json.loads(params["mq_quiz_content"])["answer"], "A")
+
+    @patch("keyword_selection.connect_mysql")
+    def test_insert_selected_news_quiz_inserts_one_row(self, connect_mysql):
+        connection = FakeConnection()
+
+        @contextmanager
+        def fake_connect(db_config):
+            yield connection
+
+        connect_mysql.side_effect = fake_connect
+        selected = {
+            "keyword": "금리",
+            "source_name": "서울경제",
+            "source_title": "금리 인하 기대 커졌다",
+            "source_url": "https://example.com/a",
+            "selection_reason": "선정 사유",
+            "keyword_description": "금리는 돈을 빌리는 비용이라 소비와 투자 흐름을 함께 바꿀 수 있어요.",
+            "quiz": {
+                "question": "질문",
+                "option_a": "보기 A",
+                "option_b": "보기 B",
+                "answer": "A",
+                "explanation": "해설",
+            },
+        }
+
+        result = insert_selected_news_quiz(
+            db_config={"host": "localhost"},
+            selected_candidate=selected,
+            target_date="2026-06-06",
+        )
+
+        self.assertTrue(connection.committed)
+        self.assertFalse(connection.rolled_back)
+        self.assertEqual(result["table"], "mq_news_quiz")
+        query, params = connection.cursor_instance.executions[0]
+        self.assertIn("INSERT INTO mq_news_quiz", query)
+        self.assertEqual(params["mq_keyword"], "금리")
+
+    @patch("keyword_selection.mysql_connect_kwargs", return_value={"host": "localhost"})
+    @patch("keyword_selection.resolve_news_keyword_storage_config")
+    @patch("keyword_selection.insert_selected_news_keyword", return_value=[])
+    @patch("keyword_selection.select_viral_news_keyword_candidate")
+    @patch("keyword_selection.mark_news_keyword_duplicates")
+    def test_selection_process_uses_existing_quiz_on_selected_candidate(
+        self,
+        mark_news_keyword_duplicates,
+        select_viral_news_keyword_candidate,
+        insert_selected_news_keyword,
+        resolve_news_keyword_storage_config,
+        mysql_connect_kwargs,
+    ):
+        candidates = [
+            {
+                "keyword": "ETF",
+                "source_title": "ETF ?좉퇋 ?곸옣",
+                "source_url": "https://example.com/a",
+                "reason": "candidate reason",
+                "keyword_description": "LLM ETF ?ㅻ챸",
+                "quiz": {
+                    "question": "LLM ETF 吏덈Ц",
+                    "option_a": "LLM ?좏깮 A",
+                    "option_b": "LLM ?좏깮 B",
+                    "answer": "A",
+                    "explanation": "LLM ?좏깮 A媛 留욌뒗 ?댁쑀?낅땲??",
+                },
+            }
+        ]
+        mark_news_keyword_duplicates.return_value = candidates
+        select_viral_news_keyword_candidate.return_value = dict(candidates[0])
+        resolve_news_keyword_storage_config.return_value = type(
+            "Config",
+            (),
+            {
+                "dedupe_table": "n8n_publish_content",
+                "dedupe_column": "keyword",
+                "target_date": "2026-06-01",
+            },
+        )()
+        args = type("Args", (), {"news_keyword_model": "test-model"})()
+        llm_client = FakeSelectionLLMClient(
+            json.dumps(
+                {
+                    "keyword_description": "LLM ETF ?ㅻ챸",
+                    "reason": "LLM ETF ?좎젙 洹쇨굅",
+                    "quiz": {
+                        "question": "LLM ETF 吏덈Ц",
+                        "option_a": "LLM ?좏깮 A",
+                        "option_b": "LLM ?좏깮 B",
+                        "answer": "A",
+                        "explanation": "LLM ?좏깮 A媛 留욌뒗 ?댁쑀?낅땲??",
+                    },
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        result = run_news_keyword_selection_process(
+            candidates=candidates,
+            args=args,
+            root_dir=Path("."),
+            output_dir=Path("output"),
+            llm_client=llm_client,
+            insert_publish_content=True,
+        )
+
+        selected = result["selected_candidate"]
+        self.assertIn("keyword_description", selected)
+        self.assertEqual(selected["keyword_description"], "LLM ETF ?ㅻ챸")
+        self.assertEqual(selected["selection_reason"], "candidate reason")
+        self.assertEqual(selected["quiz"]["answer"], "A")
+        self.assertEqual(selected["quiz"]["explanation"], "LLM ?좏깮 A媛 留욌뒗 ?댁쑀?낅땲??")
+        self.assertIn("quiz", result["checked_candidates"][0])
+        insert_selected_news_keyword.assert_called_once()
+        inserted_candidate = insert_selected_news_keyword.call_args.kwargs["selected_candidate"]
+        self.assertIn("quiz", inserted_candidate)
+
     def test_resolve_storage_config_uses_fixed_insert_target_and_target_date(self):
         config = resolve_news_keyword_storage_config()
 
@@ -200,3 +355,4 @@ class KeywordSelectionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -9,26 +9,14 @@ from gemini_client import (
     GEMINI_LLM_PROVIDER,
     GeminiLLMClient,
 )
+from news_keyword import build_news_keyword_response_json_schema
 
 
 DEFAULT_LLM_PROVIDER = CODEX_LLM_PROVIDER
 LLM_PROVIDER_ENV = "LLM_PROVIDER"
 SUPPORTED_LLM_PROVIDERS = (CODEX_LLM_PROVIDER, GEMINI_LLM_PROVIDER)
 DEFAULT_REASONING_EFFORT_ATTEMPTS = ("low", "medium")
-NEWS_KEYWORD_RESPONSE_JSON_SCHEMA = {
-    "type": "array",
-    "minItems": 5,
-    "maxItems": 5,
-    "items": {
-        "type": "object",
-        "properties": {
-            "keyword": {"type": "string"},
-            "source_url": {"type": "string"},
-            "reason": {"type": "string"},
-        },
-        "required": ["keyword", "source_url", "reason"],
-    },
-}
+NEWS_KEYWORD_RESPONSE_JSON_SCHEMA = build_news_keyword_response_json_schema()
 
 
 class LLMProviderClient(Protocol):

@@ -16,35 +16,7 @@ DEFAULT_NEWSPAPER_SOURCES = (
 DEFAULT_NEWS_KEYWORD_MODEL = "gpt-5.4-mini"
 DEFAULT_NEWS_TITLE_LIMIT = 30
 NEWS_KEYWORD_COUNT = 5
-BANNED_NEWS_KEYWORDS = {
-    "정용진",
-    "트럼프",
-    "머스크",
-    "이재명",
-    "李",
-    "경제",
-    "시장",
-    "회사",
-    "기업",
-    "정부",
-    "이슈",
-    "뉴스",
-    "기사",
-    "제목",
-    "투자",
-    "정책",
-    "핵잠",
-    "자주국방",
-    "우라늄",
-    "이란",
-}
-KEYWORD_TITLE_ALIASES = {
-    "코스피": ("코스피", "8000피", "8천피"),
-    "반도체": ("삼전닉스", "삼전", "닉스"),
-    "가상자산": ("코인", "법인계좌"),
-    "IPO": ("IPO", "상장"),
-    "ETF": ("ETF",),
-}
+NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT = 8
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -53,15 +25,15 @@ USER_AGENT = (
 
 
 class NaverNewsTitleParser(HTMLParser):
-    """설명: 네이버 경제 뉴스 HTML에서 기사 제목 링크를 수집하는 HTMLParser 구현체입니다.
-    입력: feed 메서드로 HTML 문자열을 입력받습니다.
-    출력: articles 속성에 title과 url을 가진 기사 딕셔너리 목록을 누적합니다.
+    """?ㅻ챸: ?ㅼ씠踰?寃쎌젣 ?댁뒪 HTML?먯꽌 湲곗궗 ?쒕ぉ 留곹겕瑜??섏쭛?섎뒗 HTMLParser 援ы쁽泥댁엯?덈떎.
+    ?낅젰: feed 硫붿꽌?쒕줈 HTML 臾몄옄?댁쓣 ?낅젰諛쏆뒿?덈떎.
+    異쒕젰: articles ?띿꽦??title怨?url??媛吏?湲곗궗 ?뺤뀛?덈━ 紐⑸줉???꾩쟻?⑸땲??
     """
 
     def __init__(self):
-        """설명: 파서 상태와 수집 결과 저장소를 초기화합니다.
-        입력: 별도 인자를 받지 않습니다.
-        출력: 빈 articles 목록과 캡처 상태를 가진 파서 인스턴스를 구성합니다.
+        """?ㅻ챸: ?뚯꽌 ?곹깭? ?섏쭛 寃곌낵 ??μ냼瑜?珥덇린?뷀빀?덈떎.
+        ?낅젰: 蹂꾨룄 ?몄옄瑜?諛쏆? ?딆뒿?덈떎.
+        異쒕젰: 鍮?articles 紐⑸줉怨?罹≪쿂 ?곹깭瑜?媛吏??뚯꽌 ?몄뒪?댁뒪瑜?援ъ꽦?⑸땲??
         """
         super().__init__(convert_charrefs=True)
         self.articles = []
@@ -70,9 +42,9 @@ class NaverNewsTitleParser(HTMLParser):
         self._parts = []
 
     def handle_starttag(self, tag, attrs):
-        """설명: 제목 링크로 판단되는 a 태그를 만나면 텍스트 캡처를 시작합니다.
-        입력: tag는 태그명, attrs는 HTML 속성 튜플 목록입니다.
-        출력: 내부 캡처 상태를 갱신하고 None을 반환합니다.
+        """?ㅻ챸: ?쒕ぉ 留곹겕濡??먮떒?섎뒗 a ?쒓렇瑜?留뚮굹硫??띿뒪??罹≪쿂瑜??쒖옉?⑸땲??
+        ?낅젰: tag???쒓렇紐? attrs??HTML ?띿꽦 ?쒗뵆 紐⑸줉?낅땲??
+        異쒕젰: ?대? 罹≪쿂 ?곹깭瑜?媛깆떊?섍퀬 None??諛섑솚?⑸땲??
         """
         if self._capture_depth:
             self._capture_depth += 1
@@ -89,9 +61,9 @@ class NaverNewsTitleParser(HTMLParser):
             self._parts = []
 
     def handle_endtag(self, tag):
-        """설명: 캡처 중인 태그가 끝나면 제목과 URL을 기사 목록에 추가합니다.
-        입력: tag는 닫힌 HTML 태그명입니다.
-        출력: articles 목록과 내부 상태를 갱신하고 None을 반환합니다.
+        """?ㅻ챸: 罹≪쿂 以묒씤 ?쒓렇媛 ?앸굹硫??쒕ぉ怨?URL??湲곗궗 紐⑸줉??異붽??⑸땲??
+        ?낅젰: tag???ロ엺 HTML ?쒓렇紐낆엯?덈떎.
+        異쒕젰: articles 紐⑸줉怨??대? ?곹깭瑜?媛깆떊?섍퀬 None??諛섑솚?⑸땲??
         """
         if not self._capture_depth:
             return
@@ -107,18 +79,18 @@ class NaverNewsTitleParser(HTMLParser):
         self._parts = []
 
     def handle_data(self, data):
-        """설명: 캡처 중인 제목 텍스트 조각을 임시 목록에 저장합니다.
-        입력: data는 HTMLParser가 전달한 텍스트 조각입니다.
-        출력: 내부 텍스트 조각 목록을 갱신하고 None을 반환합니다.
+        """?ㅻ챸: 罹≪쿂 以묒씤 ?쒕ぉ ?띿뒪??議곌컖???꾩떆 紐⑸줉????ν빀?덈떎.
+        ?낅젰: data??HTMLParser媛 ?꾨떖???띿뒪??議곌컖?낅땲??
+        異쒕젰: ?대? ?띿뒪??議곌컖 紐⑸줉??媛깆떊?섍퀬 None??諛섑솚?⑸땲??
         """
         if self._capture_depth:
             self._parts.append(data)
 
 
 def normalize_title(value):
-    """설명: HTML 엔티티, 태그, 중복 공백을 제거해 기사 제목 문자열을 정규화합니다.
-    입력: value는 원본 제목 문자열 또는 HTML 조각입니다.
-    출력: 정리된 제목 문자열을 반환합니다.
+    """?ㅻ챸: HTML ?뷀떚?? ?쒓렇, 以묐났 怨듬갚???쒓굅??湲곗궗 ?쒕ぉ 臾몄옄?댁쓣 ?뺢퇋?뷀빀?덈떎.
+    ?낅젰: value???먮낯 ?쒕ぉ 臾몄옄???먮뒗 HTML 議곌컖?낅땲??
+    異쒕젰: ?뺣━???쒕ぉ 臾몄옄?댁쓣 諛섑솚?⑸땲??
     """
     text = html.unescape(value)
     text = re.sub(r"<[^>]+>", " ", text)
@@ -127,17 +99,17 @@ def normalize_title(value):
 
 
 def extract_naver_news_titles(html_text):
-    """설명: 네이버 경제 뉴스 HTML에서 기사 제목만 추출합니다.
-    입력: html_text는 네이버 뉴스 HTML 문자열입니다.
-    출력: 중복 제거된 기사 제목 문자열 목록을 반환합니다.
+    """?ㅻ챸: ?ㅼ씠踰?寃쎌젣 ?댁뒪 HTML?먯꽌 湲곗궗 ?쒕ぉ留?異붿텧?⑸땲??
+    ?낅젰: html_text???ㅼ씠踰??댁뒪 HTML 臾몄옄?댁엯?덈떎.
+    異쒕젰: 以묐났 ?쒓굅??湲곗궗 ?쒕ぉ 臾몄옄??紐⑸줉??諛섑솚?⑸땲??
     """
     return [article["title"] for article in extract_naver_news_articles(html_text)]
 
 
 def extract_naver_news_articles(html_text, base_url=NAVER_ECONOMY_NEWS_URL):
-    """설명: 네이버 경제 뉴스 HTML에서 제목과 URL을 가진 기사 목록을 추출합니다.
-    입력: html_text는 HTML 문자열, base_url은 상대 링크를 절대 링크로 바꿀 기준 URL입니다.
-    출력: title과 url을 가진 기사 딕셔너리 목록을 반환합니다.
+    """?ㅻ챸: ?ㅼ씠踰?寃쎌젣 ?댁뒪 HTML?먯꽌 ?쒕ぉ怨?URL??媛吏?湲곗궗 紐⑸줉??異붿텧?⑸땲??
+    ?낅젰: html_text??HTML 臾몄옄?? base_url? ?곷? 留곹겕瑜??덈? 留곹겕濡?諛붽? 湲곗? URL?낅땲??
+    異쒕젰: title怨?url??媛吏?湲곗궗 ?뺤뀛?덈━ 紐⑸줉??諛섑솚?⑸땲??
     """
     parser = NaverNewsTitleParser()
     parser.feed(html_text)
@@ -159,9 +131,9 @@ def extract_naver_news_articles(html_text, base_url=NAVER_ECONOMY_NEWS_URL):
 
 
 def extract_naver_newspaper_front_page_articles(html_text, base_url):
-    """설명: 네이버 신문보기 HTML에서 1면 영역의 기사 제목과 URL을 추출합니다.
-    입력: html_text는 신문보기 HTML 문자열, base_url은 상대 링크 보정 기준 URL입니다.
-    출력: title과 url을 가진 1면 기사 딕셔너리 목록을 반환합니다.
+    """?ㅻ챸: ?ㅼ씠踰??좊Ц蹂닿린 HTML?먯꽌 1硫??곸뿭??湲곗궗 ?쒕ぉ怨?URL??異붿텧?⑸땲??
+    ?낅젰: html_text???좊Ц蹂닿린 HTML 臾몄옄?? base_url? ?곷? 留곹겕 蹂댁젙 湲곗? URL?낅땲??
+    異쒕젰: title怨?url??媛吏?1硫?湲곗궗 ?뺤뀛?덈━ 紐⑸줉??諛섑솚?⑸땲??
     """
     match = re.search(
         r'<div class="newspaper_brick_item[^"]*_start_page[^"]*">(?P<block>[\s\S]*?)(?=\s*<div class="newspaper_brick_item|\Z)',
@@ -169,7 +141,7 @@ def extract_naver_newspaper_front_page_articles(html_text, base_url):
     )
     if not match:
         match = re.search(
-            r'<div class="newspaper_brick_item[^"]*">(?P<block>[\s\S]*?<em>\s*1\s*</em>\s*면[\s\S]*?)(?=\s*<div class="newspaper_brick_item|\Z)',
+            r'<div class="newspaper_brick_item[^"]*">(?P<block>[\s\S]*?<em>\s*1\s*</em>\s*硫?\s\S]*?)(?=\s*<div class="newspaper_brick_item|\Z)',
             html_text,
         )
     if not match:
@@ -196,9 +168,9 @@ def extract_naver_newspaper_front_page_articles(html_text, base_url):
 
 
 def fetch_html(url, timeout=10):
-    """설명: 지정한 URL의 HTML을 User-Agent 헤더와 함께 가져옵니다.
-    입력: url은 요청 URL, timeout은 초 단위 네트워크 제한 시간입니다.
-    출력: 디코딩된 HTML 문자열을 반환하고, 요청 실패 시 RuntimeError를 발생시킵니다.
+    """?ㅻ챸: 吏?뺥븳 URL??HTML??User-Agent ?ㅻ뜑? ?④퍡 媛?몄샃?덈떎.
+    ?낅젰: url? ?붿껌 URL, timeout? 珥??⑥쐞 ?ㅽ듃?뚰겕 ?쒗븳 ?쒓컙?낅땲??
+    異쒕젰: ?붿퐫?⑸맂 HTML 臾몄옄?댁쓣 諛섑솚?섍퀬, ?붿껌 ?ㅽ뙣 ??RuntimeError瑜?諛쒖깮?쒗궢?덈떎.
     """
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
@@ -210,9 +182,9 @@ def fetch_html(url, timeout=10):
 
 
 def fetch_naver_economy_articles(url=NAVER_ECONOMY_NEWS_URL, limit=DEFAULT_NEWS_TITLE_LIMIT, timeout=10):
-    """설명: 네이버 경제 섹션에서 기사 목록을 가져옵니다.
-    입력: url은 경제 섹션 URL, limit은 최대 기사 수, timeout은 요청 제한 시간입니다.
-    출력: title과 url을 가진 기사 딕셔너리 목록을 반환합니다.
+    """?ㅻ챸: ?ㅼ씠踰?寃쎌젣 ?뱀뀡?먯꽌 湲곗궗 紐⑸줉??媛?몄샃?덈떎.
+    ?낅젰: url? 寃쎌젣 ?뱀뀡 URL, limit? 理쒕? 湲곗궗 ?? timeout? ?붿껌 ?쒗븳 ?쒓컙?낅땲??
+    異쒕젰: title怨?url??媛吏?湲곗궗 ?뺤뀛?덈━ 紐⑸줉??諛섑솚?⑸땲??
     """
     html_text = fetch_html(url, timeout=timeout)
     articles = extract_naver_news_articles(html_text, base_url=url)
@@ -224,9 +196,9 @@ def fetch_naver_economy_articles(url=NAVER_ECONOMY_NEWS_URL, limit=DEFAULT_NEWS_
 
 
 def fetch_naver_newspaper_front_page_articles(sources=DEFAULT_NEWSPAPER_SOURCES, limit=DEFAULT_NEWS_TITLE_LIMIT, timeout=10):
-    """설명: 여러 네이버 신문보기 출처에서 1면 기사 목록을 수집합니다.
-    입력: sources는 name/url 딕셔너리 목록, limit은 전체 최대 기사 수, timeout은 요청 제한 시간입니다.
-    출력: source_name, title, url을 가진 기사 딕셔너리 목록을 반환합니다.
+    """?ㅻ챸: ?щ윭 ?ㅼ씠踰??좊Ц蹂닿린 異쒖쿂?먯꽌 1硫?湲곗궗 紐⑸줉???섏쭛?⑸땲??
+    ?낅젰: sources??name/url ?뺤뀛?덈━ 紐⑸줉, limit? ?꾩껜 理쒕? 湲곗궗 ?? timeout? ?붿껌 ?쒗븳 ?쒓컙?낅땲??
+    異쒕젰: source_name, title, url??媛吏?湲곗궗 ?뺤뀛?덈━ 紐⑸줉??諛섑솚?⑸땲??
     """
     articles = []
     for source in sources:
@@ -253,9 +225,9 @@ def fetch_naver_newspaper_front_page_articles(sources=DEFAULT_NEWSPAPER_SOURCES,
 
 
 def fetch_naver_economy_titles(url=NAVER_ECONOMY_NEWS_URL, limit=DEFAULT_NEWS_TITLE_LIMIT, timeout=10):
-    """설명: 네이버 경제 섹션 기사 목록에서 제목만 가져옵니다.
-    입력: url은 경제 섹션 URL, limit은 최대 제목 수, timeout은 요청 제한 시간입니다.
-    출력: 기사 제목 문자열 목록을 반환합니다.
+    """?ㅻ챸: ?ㅼ씠踰?寃쎌젣 ?뱀뀡 湲곗궗 紐⑸줉?먯꽌 ?쒕ぉ留?媛?몄샃?덈떎.
+    ?낅젰: url? 寃쎌젣 ?뱀뀡 URL, limit? 理쒕? ?쒕ぉ ?? timeout? ?붿껌 ?쒗븳 ?쒓컙?낅땲??
+    異쒕젰: 湲곗궗 ?쒕ぉ 臾몄옄??紐⑸줉??諛섑솚?⑸땲??
     """
     return [
         article["title"]
@@ -263,40 +235,178 @@ def fetch_naver_economy_titles(url=NAVER_ECONOMY_NEWS_URL, limit=DEFAULT_NEWS_TI
     ]
 
 
-def build_news_keyword_prompt(articles, keyword_count=NEWS_KEYWORD_COUNT):
-    """설명: 기사 목록을 기반으로 키워드 후보 추출용 LLM 프롬프트를 생성합니다.
-    입력: articles는 기사 딕셔너리 목록, keyword_count는 요청할 후보 개수입니다.
-    출력: LLM에 전달할 프롬프트 문자열을 반환합니다.
-    """
-    articles_json = json.dumps(list(articles), ensure_ascii=True, indent=2)
+def build_news_keyword_response_json_schema(
+    keyword_count=NEWS_KEYWORD_COUNT,
+    include_learning_content=False,
+):
+    """?ㅻ챸: ?댁뒪 ?ㅼ썙???꾨낫 異붿텧??JSON ?묐떟 ?ㅽ궎留덈? 留뚮벊?덈떎."""
+    properties = {
+        "keyword": {"type": "string"},
+        "source_url": {"type": "string"},
+        "reason": {"type": "string"},
+    }
+    required = ["keyword", "source_url", "reason"]
+    if include_learning_content:
+        properties["keyword_description"] = {"type": "string"}
+        properties["quiz"] = {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+                "option_a": {"type": "string"},
+                "option_b": {"type": "string"},
+                "answer": {"type": "string"},
+                "explanation": {"type": "string"},
+            },
+            "required": ["question", "option_a", "option_b", "answer", "explanation"],
+        }
+        required.extend(["keyword_description", "quiz"])
+
+    return {
+        "type": "array",
+        "minItems": keyword_count,
+        "maxItems": keyword_count,
+        "items": {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        },
+    }
+
+
+def build_news_keyword_prompt_examples(
+    keyword_count=NEWS_KEYWORD_COUNT,
+    include_learning_content=False,
+):
+    """Build example keyword candidate objects for the extraction prompt."""
+    examples = [
+        {
+            "keyword": "KOSPI",
+            "source_url": "https://n.news.naver.com/mnews/article/001/0000000001",
+            "reason": "The index movement can explain investor sentiment and market direction.",
+        },
+        {
+            "keyword": "ETF",
+            "source_url": "https://n.news.naver.com/mnews/article/001/0000000002",
+            "reason": "Fund listing and inflow show demand for investment products.",
+        },
+        {
+            "keyword": "Bitcoin",
+            "source_url": "https://n.news.naver.com/mnews/article/001/0000000003",
+            "reason": "Price movement and ETF flow reveal virtual-asset investor sentiment.",
+        },
+        {
+            "keyword": "HBM",
+            "source_url": "https://n.news.naver.com/mnews/article/001/0000000004",
+            "reason": "AI server demand links memory supply to semiconductor earnings.",
+        },
+        {
+            "keyword": "Electricity tariff",
+            "source_url": "https://n.news.naver.com/mnews/article/001/0000000005",
+            "reason": "Tariff changes can affect household inflation and company costs.",
+        },
+        {
+            "keyword": "IPO",
+            "source_url": "https://n.news.naver.com/mnews/article/001/0000000006",
+            "reason": "Listing plans connect company financing with stock-market interest.",
+        },
+        {
+            "keyword": "Housing price",
+            "source_url": "https://n.news.naver.com/mnews/article/001/0000000007",
+            "reason": "Housing price changes explain real-estate supply and buyer burden.",
+        },
+        {
+            "keyword": "Semiconductor",
+            "source_url": "https://n.news.naver.com/mnews/article/001/0000000008",
+            "reason": "Export and investment flows connect the sector to domestic industry cycles.",
+        },
+    ][:keyword_count]
+
+    if not include_learning_content:
+        return examples
+
+    for example in examples:
+        keyword = example["keyword"]
+        example["keyword_description"] = (
+            f"{keyword}은 이번 기사에서 시장 참여자들이 어떤 비용, 수요, 투자 흐름을 "
+            "보고 판단해야 하는지 알려주는 핵심 단서예요."
+        )
+        example["quiz"] = {
+            "question": f"{keyword} 이슈를 해석할 때 더 타당한 관점은 무엇일까요?",
+            "option_a": "가격, 수요, 자금 흐름이 기업 실적이나 소비자 부담으로 이어지는지를 함께 보는 관점",
+            "option_b": "단기 관심이 커져도 실제 비용 구조보다는 투자 심리 변화에만 의미가 있다고 보는 관점",
+            "answer": "A",
+            "explanation": "B도 일부 맞아 보이지만 비용과 수요까지 함께 봐야 흐름을 더 정확히 이해할 수 있어요.",
+        }
+    return examples
+
+def build_news_keyword_prompt(
+    articles,
+    keyword_count=NEWS_KEYWORD_COUNT,
+    include_learning_content=False,
+):
+    """?ㅻ챸: 湲곗궗 紐⑸줉??湲곕컲?쇰줈 ?ㅼ썙???꾨낫 異붿텧??LLM ?꾨＼?꾪듃瑜??앹꽦?⑸땲??"""
+    articles_json = json.dumps(list(articles), ensure_ascii=False, indent=2)
+    example_output = json.dumps(
+        build_news_keyword_prompt_examples(
+            keyword_count=keyword_count,
+            include_learning_content=include_learning_content,
+        ),
+        ensure_ascii=False,
+        indent=2,
+    )
+    field_rule = '"keyword", "source_url", and "reason" string fields'
+    learning_rules = ""
+    if include_learning_content:
+        field_rule = (
+            '"keyword", "source_url", "reason", "keyword_description", '
+            'and "quiz" fields'
+        )
+        learning_rules = """
+- All Korean user-facing text in keyword_description, quiz.question, quiz.option_a, quiz.option_b, and quiz.explanation must use a friendly teacher-like 해요체 tone.
+- keyword_description must be one single-line Korean sentence or sentence-like line explaining the keyword in this news context.
+- keyword_description should be roughly twice as long as a very short one-line definition, about 45-75 Korean characters excluding spaces, with no newline.
+- quiz must be an object with "question", "option_a", "option_b", "answer", and "explanation" fields.
+- quiz.question must test the economic meaning or likely market/industry impact of the keyword, not just ask a direct dictionary definition.
+- quiz should target a Korean high-school student who read the title and can reason about basic macroeconomics, markets, firms, consumers, and policy effects.
+- option_a and option_b must both sound economically plausible at first glance; users should feel mildly unsure until they compare the mechanisms.
+- option_a and option_b must be same-category economic interpretations with similar length, similar specificity, and similar confidence level.
+- The correct option should be the more complete causal chain, such as policy -> costs -> prices, demand -> revenue -> investment, rates -> financing cost -> consumption, supply -> price pressure -> margins, or expectations -> asset prices -> behavior.
+- The wrong option should be a tempting but incomplete interpretation: it may focus only on short-term sentiment, confuse direct and indirect effects, confuse level and rate of change, overemphasize one side of supply/demand, or ignore who bears the cost.
+- Do not make the wrong option obviously false by using extreme words like "전혀", "무관", "반드시", "항상", "아예", "전부", "무조건", "사라진다", or "보장된다".
+- Do not make either option about word counts, name changes, color changes, product weight, weather, random facts, jokes, salary statements, or unrelated objects.
+- Avoid options where one choice says "has economic impact" and the other says "has no economic impact"; instead, make both choices describe different plausible economic impacts and let only one be more accurate.
+- At least one option should include a second-order effect or tradeoff, such as cost burden, margin pressure, investment timing, consumer demand, regional employment, inflation expectations, exchange-rate sensitivity, or supply-chain risk.
+- answer must be exactly "A" or "B".
+- explanation must be one Korean sentence in friendly teacher-like 해요체 explaining why the answer is correct and why the other option is less appropriate.
+"""
+
     return f"""You extract image-generation source keywords from Korean economy newspaper front-page article titles.
 
 Select exactly {keyword_count} main keyword candidates from the article list.
-The article list is JSON whose Korean text is encoded with Unicode escape sequences.
-Decode those strings before selecting keywords.
+The article list is JSON and Korean text is provided as-is.
 
 Rules:
 - Return only a JSON array of exactly {keyword_count} objects.
-- Each object must have "keyword", "source_url", and "reason" string fields.
+- Each object must have {field_rule}.
 - All keyword values must be unique.
 - source_url must be copied exactly from the input article URL that most directly supports the keyword.
 - reason must be one concrete Korean sentence explaining the economic event, metric, company action, or market movement behind the keyword.
 - reason must use only facts visible in the input title and must not add company names, numbers, causes, or claims that are not present there.
-- Do not use meta phrases in reason such as "헤드라인", "제목", "기사", or "뉴스".
+- Do not use meta phrases in reason such as "headline", "title", "article", or "news".
 - A good reason names the actual substance, such as price movement, fund sales, product launch, policy change, supply contract, labor dispute, or earnings impact.
-- Each keyword must be copied from the selected title or be a standard economic term directly implied by it, such as "코스피" for "8000피".
+- Each keyword must be copied from the selected title or be a standard economic term directly implied by it, such as "KOSPI" for an index-level title.
 - Do not select personal names, politician names, or executive names as keywords. Choose the economic term, event, product, policy, or market indicator instead.
-- Do not output typo-like variants. If a title implies "코스피", never write "카스피".
+- Do not output typo-like variants. If a title implies "KOSPI", never write a misspelled variant.
 - Exclude security, diplomacy, and politics topics such as nuclear submarines, uranium, Iran, Trump, presidential remarks, and executive apologies unless the keyword itself is a direct economic market term.
 - Prefer candidates like stock indexes, ETFs, IPOs, housing supply rules, virtual-asset accounts, tax revenue, nominal growth, and semiconductor market movement.
-- Use Unicode escape sequences for non-ASCII characters in the JSON output.
+- Keep Korean text as normal readable Korean. Do not escape Korean characters as \\uXXXX.
 - Do not add numbering, bullets, explanations, quotes, or markdown.
 - Each keyword must be a concise Korean or common English economic term.
 - Prefer topics that can become educational economy image content.
 - Avoid generic words like economy, market, company, government, issue, news.
-
+{learning_rules}
 Example output:
-[{{"keyword":"\\ucf54\\uc2a4\\ud53c","source_url":"https://n.news.naver.com/mnews/article/001/0000000001","reason":"\\uc9c0\\uc218\\uac00 8000\\uc120\\uc744 \\ub118\\uc5c8\\ub2e4\\ub294 \\uc2dc\\uc7a5 \\ubcc0\\ud654\\ub97c \\uc124\\uba85\\ud558\\uae30 \\uc88b\\uc740 \\ud22c\\uc790 \\uc9c0\\ud45c \\uc18c\\uc7ac\\uc785\\ub2c8\\ub2e4."}},{{"keyword":"ETF","source_url":"https://n.news.naver.com/mnews/article/001/0000000002","reason":"\\ub300\\uaddc\\ubaa8 \\uc0c1\\uc7a5\\uacfc \\uc790\\uae08 \\uc720\\uc785\\uc774 \\ud22c\\uc790\\uc0c1\\ud488 \\uc218\\uc694 \\ud750\\ub984\\uc744 \\ubcf4\\uc5ec\\uc90d\\ub2c8\\ub2e4."}},{{"keyword":"\\ube44\\ud2b8\\ucf54\\uc778","source_url":"https://n.news.naver.com/mnews/article/001/0000000003","reason":"\\uac00\\uaca9 \\ud6a1\\ubcf4\\uc640 ETF \\uc21c\\uc720\\ucd9c\\uc774 \\uac00\\uc0c1\\uc790\\uc0b0 \\ud22c\\uc790\\uc2ec\\ub9ac\\ub97c \\ub4dc\\ub7ec\\ub0c5\\ub2c8\\ub2e4."}},{{"keyword":"HBM","source_url":"https://n.news.naver.com/mnews/article/001/0000000004","reason":"AI \\uc11c\\ubc84 \\uc218\\uc694\\uac00 \\uace0\\ub300\\uc5ed\\ud3ed \\uba54\\ubaa8\\ub9ac \\uacf5\\uae09\\uacfc \\ubc18\\ub3c4\\uccb4 \\uc2e4\\uc801\\uc5d0 \\uc5f0\\uacb0\\ub429\\ub2c8\\ub2e4."}},{{"keyword":"\\uc804\\uae30\\uc694\\uae08","source_url":"https://n.news.naver.com/mnews/article/001/0000000005","reason":"\\uc694\\uae08 \\uc778\\uc0c1\\uc740 \\uac00\\uacc4 \\ubb3c\\uac00\\uc640 \\uae30\\uc5c5 \\uc6d0\\uac00\\uc5d0 \\ub3d9\\uc2dc\\uc5d0 \\uc601\\ud5a5\\uc744 \\uc904 \\uc218 \\uc788\\uc2b5\\ub2c8\\ub2e4."}}]
+{example_output}
 
 <ARTICLES_JSON>
 {articles_json}
@@ -305,9 +415,9 @@ Example output:
 
 
 def parse_news_keyword_candidates(output_text, keyword_count=NEWS_KEYWORD_COUNT):
-    """설명: LLM 원문 응답에서 키워드 후보를 파싱하고 중복을 제거합니다.
-    입력: output_text는 LLM 응답 문자열, keyword_count는 최대 후보 개수입니다.
-    출력: keyword, source_url, reason을 가진 후보 딕셔너리 목록을 반환합니다.
+    """?ㅻ챸: LLM ?먮Ц ?묐떟?먯꽌 ?ㅼ썙???꾨낫瑜??뚯떛?섍퀬 以묐났???쒓굅?⑸땲??
+    ?낅젰: output_text??LLM ?묐떟 臾몄옄?? keyword_count??理쒕? ?꾨낫 媛쒖닔?낅땲??
+    異쒕젰: keyword, source_url, reason??媛吏??꾨낫 ?뺤뀛?덈━ 紐⑸줉??諛섑솚?⑸땲??
     """
     candidates = parse_json_candidates(output_text)
     if not candidates:
@@ -331,10 +441,15 @@ def parse_news_keyword_candidates(output_text, keyword_count=NEWS_KEYWORD_COUNT)
     return unique_candidates
 
 
-def filter_news_keyword_candidates(candidates, articles, keyword_count=NEWS_KEYWORD_COUNT):
-    """설명: 후보가 실제 기사 URL과 제목에 의해 뒷받침되는지 검증하고 품질 필터를 적용합니다.
-    입력: candidates는 LLM 후보 목록, articles는 원본 기사 목록, keyword_count는 최대 후보 개수입니다.
-    출력: source_title과 정제된 reason이 포함된 후보 딕셔너리 목록을 반환합니다.
+def filter_news_keyword_candidates(
+    candidates,
+    articles,
+    keyword_count=NEWS_KEYWORD_COUNT,
+    require_learning_content=False,
+):
+    """?ㅻ챸: ?꾨낫媛 ?ㅼ젣 湲곗궗 URL怨??쒕ぉ???섑빐 ?룸컺移⑤릺?붿? 寃利앺븯怨??덉쭏 ?꾪꽣瑜??곸슜?⑸땲??
+    ?낅젰: candidates??LLM ?꾨낫 紐⑸줉, articles???먮낯 湲곗궗 紐⑸줉, keyword_count??理쒕? ?꾨낫 媛쒖닔?낅땲??
+    異쒕젰: source_title怨??뺤젣??reason???ы븿???꾨낫 ?뺤뀛?덈━ 紐⑸줉??諛섑솚?⑸땲??
     """
     articles_by_url = {article["url"]: article for article in articles}
     filtered = []
@@ -351,10 +466,13 @@ def filter_news_keyword_candidates(candidates, articles, keyword_count=NEWS_KEYW
             continue
         if not is_keyword_supported_by_title(keyword, article["title"]):
             continue
+        if require_learning_content and not has_complete_candidate_learning_content(candidate):
+            continue
 
         filtered_candidate = dict(candidate)
         filtered_candidate["source_title"] = article["title"]
-        filtered_candidate["reason"] = build_news_keyword_reason(keyword, article["title"])
+        if article.get("source_name"):
+            filtered_candidate["source_name"] = article["source_name"]
         seen.add(keyword)
         filtered.append(filtered_candidate)
         if len(filtered) == keyword_count:
@@ -364,13 +482,11 @@ def filter_news_keyword_candidates(candidates, articles, keyword_count=NEWS_KEYW
 
 
 def is_allowed_news_keyword(keyword):
-    """설명: 키워드가 금지어, 길이, 최소 문자 조건을 통과하는지 확인합니다.
-    입력: keyword는 검사할 키워드 문자열입니다.
-    출력: 허용 가능하면 True, 제외해야 하면 False를 반환합니다.
+    """?ㅻ챸: ?ㅼ썙?쒓? 湲몄씠? 理쒖냼 臾몄옄 議곌굔???듦낵?섎뒗吏 ?뺤씤?⑸땲??
+    ?낅젰: keyword??寃?ы븷 ?ㅼ썙??臾몄옄?댁엯?덈떎.
+    異쒕젰: ?덉슜 媛?ν븯硫?True, ?쒖쇅?댁빞 ?섎㈃ False瑜?諛섑솚?⑸땲??
     """
     if not keyword:
-        return False
-    if keyword in BANNED_NEWS_KEYWORDS:
         return False
     normalized = normalize_keyword_match_text(keyword)
     if len(normalized) < 2:
@@ -381,77 +497,30 @@ def is_allowed_news_keyword(keyword):
 
 
 def is_keyword_supported_by_title(keyword, title):
-    """설명: 키워드 또는 사전 정의된 별칭이 기사 제목에 포함되어 있는지 확인합니다.
-    입력: keyword는 후보 키워드, title은 원본 기사 제목입니다.
-    출력: 제목으로 뒷받침되면 True, 그렇지 않으면 False를 반환합니다.
+    """?ㅻ챸: ?ㅼ썙?쒓? 湲곗궗 ?쒕ぉ???ы븿?섏뼱 ?덈뒗吏 ?뺤씤?⑸땲??
+    ?낅젰: keyword???꾨낫 ?ㅼ썙?? title? ?먮낯 湲곗궗 ?쒕ぉ?낅땲??
+    異쒕젰: ?쒕ぉ?쇰줈 ?룸컺移⑤릺硫?True, 洹몃젃吏 ?딆쑝硫?False瑜?諛섑솚?⑸땲??
     """
     normalized_title = normalize_keyword_match_text(title)
     if not normalized_title:
         return False
 
-    terms = [keyword]
-    terms.extend(KEYWORD_TITLE_ALIASES.get(keyword, ()))
-    terms.extend(KEYWORD_TITLE_ALIASES.get(keyword.upper(), ()))
-    for term in terms:
-        normalized_term = normalize_keyword_match_text(term)
-        if normalized_term and normalized_term in normalized_title:
-            return True
-    return False
+    normalized_keyword = normalize_keyword_match_text(keyword)
+    return bool(normalized_keyword and normalized_keyword in normalized_title)
 
 
 def normalize_keyword_match_text(value):
-    """설명: 키워드 비교를 위해 한글, 영문, 숫자를 제외한 문자를 제거하고 소문자로 바꿉니다.
-    입력: value는 비교 대상 문자열입니다.
-    출력: 비교용으로 정규화된 문자열을 반환합니다.
+    """?ㅻ챸: ?ㅼ썙??鍮꾧탳瑜??꾪빐 ?쒓?, ?곷Ц, ?レ옄瑜??쒖쇅??臾몄옄瑜??쒓굅?섍퀬 ?뚮Ц?먮줈 諛붽퓠?덈떎.
+    ?낅젰: value??鍮꾧탳 ???臾몄옄?댁엯?덈떎.
+    異쒕젰: 鍮꾧탳?⑹쑝濡??뺢퇋?붾맂 臾몄옄?댁쓣 諛섑솚?⑸땲??
     """
-    return re.sub(r"[^0-9A-Za-z가-힣]+", "", str(value)).lower()
-
-
-def build_news_keyword_reason(keyword, title):
-    """설명: 필터를 통과한 키워드와 기사 제목으로 사용자에게 보여줄 근거 문장을 만듭니다.
-    입력: keyword는 최종 후보 키워드, title은 해당 키워드를 뒷받침한 기사 제목입니다.
-    출력: 한국어 근거 문장 문자열을 반환합니다.
-    """
-    title_text = clean_title_for_reason(title)
-    keyword_key = keyword.upper()
-
-    if keyword == "코스피":
-        return f"{title_text} 상황을 바탕으로 국내 주가지수와 대형주 주가 흐름을 함께 설명하기 좋은 소재입니다."
-    if keyword_key == "ETF":
-        return f"{title_text} 흐름을 바탕으로 ETF 자금 규모와 지수 움직임의 관계를 설명하기 좋은 소재입니다."
-    if keyword == "반도체":
-        return f"{title_text} 흐름을 바탕으로 반도체 대형주가 지수 상승에 미치는 영향을 설명하기 좋은 소재입니다."
-    if keyword_key == "IPO":
-        return f"{title_text} 이슈를 바탕으로 기업공개 규모와 성장기업 가치평가를 설명하기 좋은 소재입니다."
-    if keyword in {"도시형생활주택", "건축규제"}:
-        return f"{title_text} 변화가 있어 주택 공급 규제 완화와 부동산 정책을 설명하기 좋은 소재입니다."
-    if any(term in keyword for term in ("코인", "가상자산", "법인계좌")):
-        return f"{title_text} 상황을 바탕으로 가상자산 제도와 자금 이동을 설명하기 좋은 소재입니다."
-    if keyword in {"세수", "명목성장률"}:
-        return f"{title_text} 전망을 바탕으로 성장률과 세수 흐름의 연결을 설명하기 좋은 소재입니다."
-    if keyword in {"핵잠", "방산", "자주국방"}:
-        return f"{title_text} 계획을 바탕으로 방산 투자와 자주국방 산업 흐름을 설명하기 좋은 소재입니다."
-    if keyword == "육아휴직":
-        return f"{title_text} 변화를 바탕으로 공공부문 근로제도와 육아 지원 정책을 설명하기 좋은 소재입니다."
-
-    return f"{title_text} 내용을 바탕으로 {keyword}의 경제적 맥락을 설명하기 좋은 소재입니다."
-
-
-def clean_title_for_reason(title):
-    """설명: 근거 문장에 넣기 좋도록 기사 제목의 괄호 태그와 불필요한 공백을 정리합니다.
-    입력: title은 원본 기사 제목 문자열입니다.
-    출력: 근거 문장용으로 정리된 제목 문자열을 반환합니다.
-    """
-    text = normalize_title(title)
-    text = re.sub(r"\[[^\]]+\]", "", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip(" .")
+    return "".join(character for character in str(value).lower() if character.isalnum())
 
 
 def parse_json_candidates(output_text):
-    """설명: LLM 응답에서 JSON 배열 또는 후보 목록 필드를 찾아 파싱합니다.
-    입력: output_text는 LLM 응답 문자열입니다.
-    출력: 파싱된 후보 원본 목록을 반환하고, 실패하면 빈 목록을 반환합니다.
+    """?ㅻ챸: LLM ?묐떟?먯꽌 JSON 諛곗뿴 ?먮뒗 ?꾨낫 紐⑸줉 ?꾨뱶瑜?李얠븘 ?뚯떛?⑸땲??
+    ?낅젰: output_text??LLM ?묐떟 臾몄옄?댁엯?덈떎.
+    異쒕젰: ?뚯떛???꾨낫 ?먮낯 紐⑸줉??諛섑솚?섍퀬, ?ㅽ뙣?섎㈃ 鍮?紐⑸줉??諛섑솚?⑸땲??
     """
     text = output_text.strip()
     json_texts = [text]
@@ -481,9 +550,9 @@ def parse_json_candidates(output_text):
 
 
 def parse_line_candidates(output_text):
-    """설명: JSON 파싱에 실패한 응답을 줄 단위 후보 문자열 목록으로 해석합니다.
-    입력: output_text는 LLM 응답 문자열입니다.
-    출력: 비어 있지 않은 줄 후보 문자열 목록을 반환합니다.
+    """?ㅻ챸: JSON ?뚯떛???ㅽ뙣???묐떟??以??⑥쐞 ?꾨낫 臾몄옄??紐⑸줉?쇰줈 ?댁꽍?⑸땲??
+    ?낅젰: output_text??LLM ?묐떟 臾몄옄?댁엯?덈떎.
+    異쒕젰: 鍮꾩뼱 ?덉? ?딆? 以??꾨낫 臾몄옄??紐⑸줉??諛섑솚?⑸땲??
     """
     candidates = []
     for line in output_text.splitlines():
@@ -494,10 +563,117 @@ def parse_line_candidates(output_text):
     return candidates
 
 
+def normalize_optional_candidate_text(value):
+    """?ㅻ챸: ?좏깮 ?꾨뱶??臾몄옄??媛믪쓣 ?뺣━?⑸땲??"""
+    if value is None:
+        return ""
+    text = html.unescape(str(value))
+    text = re.sub(r"\s+", " ", text)
+    return text.strip().strip("\"'` ")
+
+
+def normalize_quiz_answer(value):
+    """?ㅻ챸: LLM??諛섑솚???뺣떟 ?쒓린瑜?A ?먮뒗 B濡??뺢퇋?뷀빀?덈떎."""
+    text = normalize_optional_candidate_text(value).upper().strip(".:)")
+    if text in {"A", "OPTION_A", "OPTION A", "QUIZ_OPTION_A"}:
+        return "A"
+    if text in {"B", "OPTION_B", "OPTION B", "QUIZ_OPTION_B"}:
+        return "B"
+    return ""
+
+
+def first_candidate_text(*values):
+    """?ㅻ챸: ?щ윭 ?꾨낫 媛?以?泥?踰덉㎏ 鍮꾩뼱 ?덉? ?딆? 臾몄옄?댁쓣 諛섑솚?⑸땲??"""
+    for value in values:
+        text = normalize_optional_candidate_text(value)
+        if text:
+            return text
+    return ""
+
+
+def normalize_candidate_learning_content(candidate):
+    """?ㅻ챸: ?ㅼ썙???ㅻ챸怨?A/B ?댁쫰 ?꾨뱶瑜??쒖? 援ъ“濡??뺢퇋?뷀빀?덈떎."""
+    if not isinstance(candidate, dict):
+        return {}
+
+    quiz = candidate.get("quiz")
+    if not isinstance(quiz, dict):
+        quiz = {}
+
+    description = first_candidate_text(
+        candidate.get("keyword_description"),
+        candidate.get("one_line_description"),
+        candidate.get("description"),
+    )
+    question = first_candidate_text(
+        quiz.get("question"),
+        candidate.get("quiz_question"),
+        candidate.get("question"),
+    )
+    option_a = first_candidate_text(
+        quiz.get("option_a"),
+        quiz.get("A"),
+        quiz.get("a"),
+        candidate.get("quiz_option_a"),
+        candidate.get("option_a"),
+    )
+    option_b = first_candidate_text(
+        quiz.get("option_b"),
+        quiz.get("B"),
+        quiz.get("b"),
+        candidate.get("quiz_option_b"),
+        candidate.get("option_b"),
+    )
+    answer = normalize_quiz_answer(
+        quiz.get("answer")
+        or candidate.get("quiz_answer")
+        or candidate.get("answer")
+    )
+    explanation = first_candidate_text(
+        quiz.get("explanation"),
+        candidate.get("quiz_explanation"),
+        candidate.get("explanation"),
+    )
+
+    learning_content = {}
+    if description:
+        learning_content["keyword_description"] = description
+
+    normalized_quiz = {}
+    if question:
+        normalized_quiz["question"] = question
+    if option_a:
+        normalized_quiz["option_a"] = option_a
+    if option_b:
+        normalized_quiz["option_b"] = option_b
+    if answer:
+        normalized_quiz["answer"] = answer
+    if explanation:
+        normalized_quiz["explanation"] = explanation
+    if normalized_quiz:
+        learning_content["quiz"] = normalized_quiz
+    return learning_content
+
+
+def has_complete_candidate_learning_content(candidate):
+    """?ㅻ챸: ?꾨낫???쒖쨪?ㅻ챸怨??꾩꽦??A/B ?댁쫰媛 ?덈뒗吏 ?뺤씤?⑸땲??"""
+    learning_content = normalize_candidate_learning_content(candidate)
+    quiz = learning_content.get("quiz")
+    return (
+        bool(learning_content.get("keyword_description"))
+        and isinstance(quiz, dict)
+        and bool(quiz.get("question"))
+        and bool(quiz.get("option_a"))
+        and bool(quiz.get("option_b"))
+        and quiz.get("answer") in {"A", "B"}
+        and bool(quiz.get("explanation"))
+    )
+
+
 def normalize_candidate(candidate):
-    """설명: 딕셔너리 또는 문자열 후보를 표준 후보 딕셔너리 형태로 정규화합니다.
-    입력: candidate는 keyword/source_url/reason 딕셔너리 또는 구분자를 포함한 문자열입니다.
-    출력: keyword, source_url, reason 키를 가진 정규화된 딕셔너리를 반환합니다.
+    """?ㅻ챸: ?뺤뀛?덈━ ?먮뒗 臾몄옄???꾨낫瑜??쒖? ?꾨낫 ?뺤뀛?덈━ ?뺥깭濡??뺢퇋?뷀빀?덈떎.
+    ?낅젰: candidate??keyword/source_url/reason ?뺤뀛?덈━ ?먮뒗 援щ텇?먮? ?ы븿??臾몄옄?댁엯?덈떎.
+    異쒕젰: keyword, source_url, reason ?ㅻ? 媛吏??뺢퇋?붾맂 ?뺤뀛?덈━瑜?諛섑솚?⑸땲??
     """
     if isinstance(candidate, dict):
         keyword = candidate.get("keyword", "")
@@ -509,7 +685,7 @@ def normalize_candidate(candidate):
         if len(parts) == 3:
             keyword, source_url, reason = parts
         else:
-            match = re.match(r"(.+?)\s+(?:-|—)\s+(https?://\S+)\s+(?:-|—)\s+(.+)", text)
+            match = re.match(r"(.+?)\s+(?:-|??\s+(https?://\S+)\s+(?:-|??\s+(.+)", text)
             if match:
                 keyword = match.group(1)
                 source_url = match.group(2)
@@ -525,8 +701,12 @@ def normalize_candidate(candidate):
     source_url = re.sub(r"\s+", "", source_url)
     reason = html.unescape(str(reason))
     reason = re.sub(r"\s+", " ", reason)
-    return {
+    normalized = {
         "keyword": keyword.strip().strip("\"'` "),
         "source_url": source_url.strip().strip("\"'` "),
         "reason": reason.strip().strip("\"'` "),
     }
+    normalized.update(normalize_candidate_learning_content(candidate))
+    return normalized
+
+

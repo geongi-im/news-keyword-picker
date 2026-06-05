@@ -12,12 +12,14 @@ from llm_provider import (
     SUPPORTED_LLM_PROVIDERS,
     create_llm_client,
 )
-from keyword_selection import run_news_keyword_selection_insert_process
+from keyword_selection import run_news_keyword_selection_process
 from news_keyword import (
     DEFAULT_NEWSPAPER_SOURCES,
     DEFAULT_NEWS_TITLE_LIMIT,
+    NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT,
     NEWS_KEYWORD_COUNT,
     build_news_keyword_prompt,
+    build_news_keyword_response_json_schema,
     fetch_naver_newspaper_front_page_articles,
     filter_news_keyword_candidates,
     parse_news_keyword_candidates,
@@ -74,7 +76,7 @@ def parse_args(argv):
     parser.add_argument(
         "--send-telegram",
         action="store_true",
-        help="Send extracted news keyword candidates to Telegram.",
+        help="Send the final selected news quiz to Telegram.",
     )
     parser.add_argument(
         "--telegram-test",
@@ -82,9 +84,14 @@ def parse_args(argv):
         help="Send Telegram output to TELEGRAM_CHAT_TEST_ID instead of TELEGRAM_CHAT_ID.",
     )
     parser.add_argument(
-        "--select-keyword-and-insert",
+        "--insert-publish-content",
         action="store_true",
-        help="Check keyword duplicates in MySQL, select one final keyword, and run the insert SQL.",
+        help="Insert the final selected keyword into n8n_publish_content.",
+    )
+    parser.add_argument(
+        "--insert-news-quiz",
+        action="store_true",
+        help="Insert the final selected news quiz into mq_news_quiz.",
     )
     return parser.parse_args(argv)
 
@@ -96,6 +103,16 @@ def validate_args(args):
     """
     if args.news_title_limit < 1:
         raise ValueError("--news-title-limit must be greater than 0.")
+
+
+def resolve_news_keyword_candidate_count(args):
+    """설명: 실행 옵션에 따라 LLM에서 받을 후보 개수를 결정합니다."""
+    return NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT
+
+
+def resolve_min_news_keyword_candidate_count(args):
+    """설명: 필터 후 실행을 계속할 최소 후보 개수를 결정합니다."""
+    return NEWS_KEYWORD_COUNT
 
 
 def suggest_news_keyword_candidates(args, output_dir, llm_client=None):
@@ -110,20 +127,45 @@ def suggest_news_keyword_candidates(args, output_dir, llm_client=None):
     )
     print(f"news_titles_fetched: {len(articles)}")
 
-    prompt = build_news_keyword_prompt(articles)
+    candidate_count = resolve_news_keyword_candidate_count(args)
+    min_candidate_count = resolve_min_news_keyword_candidate_count(args)
+    include_learning_content = True
+    prompt = build_news_keyword_prompt(
+        articles,
+        keyword_count=candidate_count,
+        include_learning_content=include_learning_content,
+    )
     if llm_client is None:
         llm_client = create_llm_client(args.llm_provider)
-    candidates, output = extract_news_keyword_candidates(args, output_dir, articles, prompt, llm_client)
-    if len(candidates) == NEWS_KEYWORD_COUNT:
+    candidates, output = extract_news_keyword_candidates(
+        args,
+        output_dir,
+        articles,
+        prompt,
+        llm_client,
+        candidate_count=candidate_count,
+        min_candidate_count=min_candidate_count,
+        include_learning_content=include_learning_content,
+    )
+    if len(candidates) >= min_candidate_count:
         return candidates
 
     raise RuntimeError(
-        f"Expected {NEWS_KEYWORD_COUNT} news keyword candidates after quality filtering, "
+        f"Expected at least {min_candidate_count} news keyword candidates after quality filtering, "
         f"but got {len(candidates)}. output={output!r}"
     )
 
 
-def extract_news_keyword_candidates(args, output_dir, articles, prompt, llm_client):
+def extract_news_keyword_candidates(
+    args,
+    output_dir,
+    articles,
+    prompt,
+    llm_client,
+    candidate_count=NEWS_KEYWORD_COUNT,
+    min_candidate_count=NEWS_KEYWORD_COUNT,
+    include_learning_content=False,
+):
     """설명: LLM 응답을 파싱하고 필터링하며, 후보 수가 부족하면 한 번 재시도합니다.
     입력: args는 CLI 옵션, output_dir은 출력 디렉터리, articles는 원본 기사 목록, prompt는 LLM 프롬프트, llm_client는 LLM 호출 구현체입니다.
     출력: 후보 목록과 마지막 LLM 원문 응답 문자열의 튜플을 반환합니다.
@@ -138,12 +180,25 @@ def extract_news_keyword_candidates(args, output_dir, articles, prompt, llm_clie
             output_dir=output_dir,
             model=args.news_keyword_model or llm_client.default_model,
             reasoning_effort=reasoning_effort,
+            response_json_schema=build_news_keyword_response_json_schema(
+                keyword_count=candidate_count,
+                include_learning_content=include_learning_content,
+            ),
+            response_mime_type="application/json",
         )
         last_output = output
 
-        parsed_candidates = parse_news_keyword_candidates(output)
-        candidates = filter_news_keyword_candidates(parsed_candidates, articles)
-        if len(candidates) == NEWS_KEYWORD_COUNT:
+        parsed_candidates = parse_news_keyword_candidates(
+            output,
+            keyword_count=candidate_count,
+        )
+        candidates = filter_news_keyword_candidates(
+            parsed_candidates,
+            articles,
+            keyword_count=candidate_count,
+            require_learning_content=include_learning_content,
+        )
+        if len(candidates) >= min_candidate_count:
             return candidates, output
         if index < len(attempts):
             print(
@@ -176,17 +231,27 @@ def print_news_keyword_candidates(candidates):
         print(f"   title: {candidate.get('source_title', '')}")
         print(f"   source_url: {candidate['source_url']}")
         print(f"   reason: {candidate['reason']}")
+        if candidate.get("keyword_description"):
+            print(f"   keyword_description: {candidate['keyword_description']}")
+        quiz = candidate.get("quiz")
+        if isinstance(quiz, dict) and quiz:
+            print(f"   quiz: {quiz.get('question', '')}")
+            print(f"      A. {quiz.get('option_a', '')}")
+            print(f"      B. {quiz.get('option_b', '')}")
+            print(f"      answer: {quiz.get('answer', '')}")
+            print(f"      explanation: {quiz.get('explanation', '')}")
 
 
 def print_news_keyword_selection_insert_result(result):
-    """설명: DB 중복 상태, 최종 선택 키워드, insert 결과를 콘솔에 출력합니다.
+    """설명: DB 중복 상태, 최종 선택 키워드, 선택적 insert 결과를 콘솔에 출력합니다.
     입력: result는 키워드 선택/insert 처리 결과 딕셔너리입니다.
     출력: 콘솔에 내용을 출력하고 None을 반환합니다.
     """
-    print("news_keyword_db_status:")
-    for index, candidate in enumerate(result["checked_candidates"], start=1):
-        status = "duplicate" if candidate.get("exists_in_db") else "new"
-        print(f"{index}. {candidate['keyword']}: {status}")
+    if result.get("insert_result"):
+        print("news_keyword_db_status:")
+        for index, candidate in enumerate(result["checked_candidates"], start=1):
+            status = "duplicate" if candidate.get("exists_in_db") else "new"
+            print(f"{index}. {candidate['keyword']}: {status}")
 
     selected = result["selected_candidate"]
     insert_result = result["insert_result"]
@@ -195,12 +260,21 @@ def print_news_keyword_selection_insert_result(result):
     print(f"source_url: {selected['source_url']}")
     print(f"reason: {selected.get('selection_reason', '')}")
     print(f"target_date: {result['target_date']}")
-    print("insert_result:")
-    for item in insert_result:
+    if insert_result:
+        print("insert_result:")
+        for item in insert_result:
+            print(
+                f"- category={item['category']} "
+                f"affected_rows={item['affected_rows']} "
+                f"lastrowid={item['lastrowid']}"
+            )
+    news_quiz_insert_result = result.get("news_quiz_insert_result")
+    if news_quiz_insert_result:
+        print("news_quiz_insert_result:")
         print(
-            f"- category={item['category']} "
-            f"affected_rows={item['affected_rows']} "
-            f"lastrowid={item['lastrowid']}"
+            f"- table={news_quiz_insert_result['table']} "
+            f"affected_rows={news_quiz_insert_result['affected_rows']} "
+            f"lastrowid={news_quiz_insert_result['lastrowid']}"
         )
 
 
@@ -243,19 +317,43 @@ def format_news_keyword_candidates_message(candidates):
     입력: candidates는 keyword, source_title, source_url, reason 값을 가진 후보 목록입니다.
     출력: Telegram parse_mode=html에 사용할 메시지 문자열을 반환합니다.
     """
-    lines = ["<b>경제지 1면 키워드 후보</b>"]
+    blocks = ["<b>경제지 1면 키워드 후보</b>"]
     for index, candidate in enumerate(candidates, start=1):
         keyword = html.escape(candidate["keyword"])
         source_title = html.escape(candidate.get("source_title", ""))
         source_url = html.escape(candidate["source_url"], quote=True)
-        reason = html.escape(candidate["reason"])
-        lines.append(
-            f"{index}. <b>{keyword}</b>\n"
-            f"원본 제목: {source_title}\n"
-            f"근거: {reason}\n"
-            f"출처: <a href=\"{source_url}\">원문 보기</a>"
-        )
-    return "\n\n".join(lines)
+        candidate_lines = [
+            f"{index}. <b>{keyword}</b>",
+            f"<b>원본 제목</b>\n{source_title}",
+        ]
+        if candidate.get("keyword_description"):
+            keyword_description = html.escape(candidate["keyword_description"])
+            candidate_lines.append(f"<b>한줄설명</b>\n{keyword_description}")
+        quiz = candidate.get("quiz")
+        if isinstance(quiz, dict) and quiz:
+            candidate_lines.extend(format_quiz_message_lines(quiz))
+        candidate_lines.append(f"<a href=\"{source_url}\">원문 보기</a>")
+        blocks.append("\n".join(candidate_lines))
+    return "\n\n".join(blocks)
+
+
+def format_quiz_message_lines(quiz):
+    """설명: 후보 퀴즈를 Telegram HTML 메시지 줄 목록으로 변환합니다."""
+    question = html.escape(quiz.get("question", ""))
+    option_a = html.escape(quiz.get("option_a", ""))
+    option_b = html.escape(quiz.get("option_b", ""))
+    answer = html.escape(quiz.get("answer", ""))
+    lines = [
+        "<b>미니 퀴즈</b>",
+        f"Q. {question}",
+        f"A. {option_a}",
+        f"B. {option_b}",
+        f"<b>정답: {answer}</b>",
+    ]
+    if quiz.get("explanation"):
+        explanation = html.escape(quiz.get("explanation", ""))
+        lines.append(f"<b>해설</b>\n{explanation}")
+    return lines
 
 
 def format_selected_news_keyword_message(selected_candidate):
@@ -265,20 +363,40 @@ def format_selected_news_keyword_message(selected_candidate):
     """
     keyword = html.escape(selected_candidate["keyword"])
     source_title = html.escape(selected_candidate.get("source_title", ""))
-    selection_reason = html.escape(
-        selected_candidate.get("selection_reason")
-        or selected_candidate.get("reason", "")
-    )
     source_url = html.escape(selected_candidate["source_url"], quote=True)
-    return "\n".join(
-        [
-            "<b>최종 경제 키워드</b>",
-            f"키워드: <b>{keyword}</b>",
-            f"원본 제목: {source_title}",
-            f"선정 사유: {selection_reason}",
-            f"원본 링크: <a href=\"{source_url}\">원문 보기</a>",
-        ]
-    )
+    sections = [
+        "<b>오늘의 경제뉴스 퀴즈</b>",
+        f"<b>1. 뉴스제목</b>\n{source_title}",
+        f"<b>2. 뉴스링크</b>\n<a href=\"{source_url}\">원문 보기</a>",
+        f"<b>3. 키워드</b>\n<b>{keyword}</b>",
+    ]
+    if selected_candidate.get("keyword_description"):
+        keyword_description = html.escape(selected_candidate["keyword_description"])
+        sections.append(f"<b>4. 한줄설명</b>\n{keyword_description}")
+    quiz = selected_candidate.get("quiz")
+    if isinstance(quiz, dict) and quiz:
+        question = html.escape(quiz.get("question", ""))
+        option_a = html.escape(quiz.get("option_a", ""))
+        option_b = html.escape(quiz.get("option_b", ""))
+        answer = html.escape(quiz.get("answer", ""))
+        explanation = html.escape(quiz.get("explanation", ""))
+        sections.append(
+            "\n".join(
+                [
+                    "<b>5. 퀴즈</b>",
+                    f"Q. {question}",
+                    f"A. {option_a}",
+                    f"B. {option_b}",
+                ]
+            )
+        )
+        explanation_lines = ["<b>6. 해설</b>"]
+        if answer:
+            explanation_lines.append(f"정답: <b>{answer}</b>")
+        if explanation:
+            explanation_lines.append(explanation)
+        sections.append("\n".join(explanation_lines))
+    return "\n\n".join(sections)
 
 
 def main(argv=None):
@@ -297,27 +415,21 @@ def main(argv=None):
         llm_client = create_llm_client(args.llm_provider)
         candidates = suggest_news_keyword_candidates(args, output_dir, llm_client)
         print_news_keyword_candidates(candidates)
-        selection_result = None
-        if args.select_keyword_and_insert:
-            selection_result = run_news_keyword_selection_insert_process(
-                candidates=candidates,
-                args=args,
-                root_dir=root_dir,
-                output_dir=output_dir,
-                llm_client=llm_client,
-            )
-            print_news_keyword_selection_insert_result(selection_result)
+        selection_result = run_news_keyword_selection_process(
+            candidates=candidates,
+            args=args,
+            root_dir=root_dir,
+            output_dir=output_dir,
+            llm_client=llm_client,
+            insert_publish_content=args.insert_publish_content,
+            insert_news_quiz=args.insert_news_quiz,
+        )
+        print_news_keyword_selection_insert_result(selection_result)
         if args.send_telegram:
-            if selection_result is None:
-                send_news_keyword_candidates_to_telegram(
-                    candidates,
-                    use_test_chat=args.telegram_test,
-                )
-            else:
-                send_selected_news_keyword_to_telegram(
-                    selection_result["selected_candidate"],
-                    use_test_chat=args.telegram_test,
-                )
+            send_selected_news_keyword_to_telegram(
+                selection_result["selected_candidate"],
+                use_test_chat=args.telegram_test,
+            )
             print("telegram_sent: true")
         return 0
     except (FileNotFoundError, ValueError, RuntimeError, MySQLError) as exc:
