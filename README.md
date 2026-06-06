@@ -48,6 +48,12 @@ python src/main.py --insert-news-quiz
 python src/main.py --send-telegram --insert-publish-content
 ```
 
+텔레그램 전송과 새 `mq_news_quiz` 테이블 insert를 함께 실행:
+
+```powershell
+python src/main.py --send-telegram --insert-news-quiz
+```
+
 `--insert-publish-content`를 켜면 후보를 `n8n_publish_content.keyword`에서 먼저 조회하고, 이미 존재하지 않는 후보만 남긴 뒤 경제적 이슈성/바이럴 가능성이 가장 높은 1개를 LLM으로 선별합니다. 마지막으로 `n8n_publish_content`에 `3초퀴즈`, `자녀에게설명하기` 카테고리로 2건을 insert합니다.
 
 `--insert-news-quiz`를 켜면 최종 선정된 뉴스 1건의 제목, 링크, 키워드, 한줄설명, 퀴즈 JSON, 선정 사유를 `mq_news_quiz`에 1건 insert합니다.
