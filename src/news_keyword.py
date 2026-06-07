@@ -12,6 +12,7 @@ DEFAULT_NEWSPAPER_SOURCES = (
     {"name": "파이낸셜뉴스", "url": "https://media.naver.com/press/014/newspaper"},
     {"name": "머니투데이", "url": "https://media.naver.com/press/008/newspaper"},
     {"name": "서울경제", "url": "https://media.naver.com/press/011/newspaper"},
+    {"name": "한국경제", "url": "https://media.naver.com/press/015/newspaper"}
 )
 DEFAULT_NEWS_KEYWORD_MODEL = "gpt-5.4-mini"
 DEFAULT_NEWS_TITLE_LIMIT = 30
@@ -25,15 +26,17 @@ USER_AGENT = (
 
 
 class NaverNewsTitleParser(HTMLParser):
-    """?ㅻ챸: ?ㅼ씠踰?寃쎌젣 ?댁뒪 HTML?먯꽌 湲곗궗 ?쒕ぉ 留곹겕瑜??섏쭛?섎뒗 HTMLParser 援ы쁽泥댁엯?덈떎.
-    ?낅젰: feed 硫붿꽌?쒕줈 HTML 臾몄옄?댁쓣 ?낅젰諛쏆뒿?덈떎.
-    異쒕젰: articles ?띿꽦??title怨?url??媛吏?湲곗궗 ?뺤뀛?덈━ 紐⑸줉???꾩쟻?⑸땲??
+    """네이버 경제 뉴스 HTML에서 기사 제목 링크를 수집하는 HTMLParser 구현체입니다.
+
+    입력: feed 메서드로 HTML 문자열을 입력받습니다.
+    출력: articles 속성에 title과 url을 가진 기사 딕셔너리 목록을 누적합니다.
     """
 
     def __init__(self):
-        """?ㅻ챸: ?뚯꽌 ?곹깭? ?섏쭛 寃곌낵 ??μ냼瑜?珥덇린?뷀빀?덈떎.
-        ?낅젰: 蹂꾨룄 ?몄옄瑜?諛쏆? ?딆뒿?덈떎.
-        異쒕젰: 鍮?articles 紐⑸줉怨?罹≪쿂 ?곹깭瑜?媛吏??뚯꽌 ?몄뒪?댁뒪瑜?援ъ꽦?⑸땲??
+        """파서 상태와 수집 결과 저장소를 초기화합니다.
+
+        입력: 별도 인자를 받지 않습니다.
+        출력: 빈 articles 목록과 캡처 상태를 가진 파서 인스턴스를 구성합니다.
         """
         super().__init__(convert_charrefs=True)
         self.articles = []
@@ -42,9 +45,10 @@ class NaverNewsTitleParser(HTMLParser):
         self._parts = []
 
     def handle_starttag(self, tag, attrs):
-        """?ㅻ챸: ?쒕ぉ 留곹겕濡??먮떒?섎뒗 a ?쒓렇瑜?留뚮굹硫??띿뒪??罹≪쿂瑜??쒖옉?⑸땲??
-        ?낅젰: tag???쒓렇紐? attrs??HTML ?띿꽦 ?쒗뵆 紐⑸줉?낅땲??
-        異쒕젰: ?대? 罹≪쿂 ?곹깭瑜?媛깆떊?섍퀬 None??諛섑솚?⑸땲??
+        """제목 링크로 판단되는 a 태그를 만나면 텍스트 캡처를 시작합니다.
+
+        입력: tag는 태그명, attrs는 HTML 속성 튜플 목록입니다.
+        출력: 내부 캡처 상태를 갱신하고 None을 반환합니다.
         """
         if self._capture_depth:
             self._capture_depth += 1
@@ -61,9 +65,10 @@ class NaverNewsTitleParser(HTMLParser):
             self._parts = []
 
     def handle_endtag(self, tag):
-        """?ㅻ챸: 罹≪쿂 以묒씤 ?쒓렇媛 ?앸굹硫??쒕ぉ怨?URL??湲곗궗 紐⑸줉??異붽??⑸땲??
-        ?낅젰: tag???ロ엺 HTML ?쒓렇紐낆엯?덈떎.
-        異쒕젰: articles 紐⑸줉怨??대? ?곹깭瑜?媛깆떊?섍퀬 None??諛섑솚?⑸땲??
+        """캡처 중인 태그가 끝나면 제목과 URL을 기사 목록에 추가합니다.
+
+        입력: tag는 닫힘 HTML 태그명입니다.
+        출력: articles 목록과 내부 상태를 갱신하고 None을 반환합니다.
         """
         if not self._capture_depth:
             return
@@ -79,18 +84,20 @@ class NaverNewsTitleParser(HTMLParser):
         self._parts = []
 
     def handle_data(self, data):
-        """?ㅻ챸: 罹≪쿂 以묒씤 ?쒕ぉ ?띿뒪??議곌컖???꾩떆 紐⑸줉????ν빀?덈떎.
-        ?낅젰: data??HTMLParser媛 ?꾨떖???띿뒪??議곌컖?낅땲??
-        異쒕젰: ?대? ?띿뒪??議곌컖 紐⑸줉??媛깆떊?섍퀬 None??諛섑솚?⑸땲??
+        """캡처 중인 제목 텍스트 조각을 임시 목록에 저장합니다.
+
+        입력: data는 HTMLParser가 전달한 텍스트 조각입니다.
+        출력: 내부 텍스트 조각 목록을 갱신하고 None을 반환합니다.
         """
         if self._capture_depth:
             self._parts.append(data)
 
 
 def normalize_title(value):
-    """?ㅻ챸: HTML ?뷀떚?? ?쒓렇, 以묐났 怨듬갚???쒓굅??湲곗궗 ?쒕ぉ 臾몄옄?댁쓣 ?뺢퇋?뷀빀?덈떎.
-    ?낅젰: value???먮낯 ?쒕ぉ 臾몄옄???먮뒗 HTML 議곌컖?낅땲??
-    異쒕젰: ?뺣━???쒕ぉ 臾몄옄?댁쓣 諛섑솚?⑸땲??
+    """HTML 엔티티, 태그, 중복 공백을 제거해 기사 제목 문자열을 정규화합니다.
+
+    입력: value는 원본 제목 문자열 또는 HTML 조각입니다.
+    출력: 정리된 제목 문자열을 반환합니다.
     """
     text = html.unescape(value)
     text = re.sub(r"<[^>]+>", " ", text)
@@ -99,17 +106,19 @@ def normalize_title(value):
 
 
 def extract_naver_news_titles(html_text):
-    """?ㅻ챸: ?ㅼ씠踰?寃쎌젣 ?댁뒪 HTML?먯꽌 湲곗궗 ?쒕ぉ留?異붿텧?⑸땲??
-    ?낅젰: html_text???ㅼ씠踰??댁뒪 HTML 臾몄옄?댁엯?덈떎.
-    異쒕젰: 以묐났 ?쒓굅??湲곗궗 ?쒕ぉ 臾몄옄??紐⑸줉??諛섑솚?⑸땲??
+    """네이버 경제 뉴스 HTML에서 기사 제목만 추출합니다.
+
+    입력: html_text는 네이버 뉴스 HTML 문자열입니다.
+    출력: 중복 제거된 기사 제목 문자열 목록을 반환합니다.
     """
     return [article["title"] for article in extract_naver_news_articles(html_text)]
 
 
 def extract_naver_news_articles(html_text, base_url=NAVER_ECONOMY_NEWS_URL):
-    """?ㅻ챸: ?ㅼ씠踰?寃쎌젣 ?댁뒪 HTML?먯꽌 ?쒕ぉ怨?URL??媛吏?湲곗궗 紐⑸줉??異붿텧?⑸땲??
-    ?낅젰: html_text??HTML 臾몄옄?? base_url? ?곷? 留곹겕瑜??덈? 留곹겕濡?諛붽? 湲곗? URL?낅땲??
-    異쒕젰: title怨?url??媛吏?湲곗궗 ?뺤뀛?덈━ 紐⑸줉??諛섑솚?⑸땲??
+    """네이버 경제 뉴스 HTML에서 제목과 URL을 가진 기사 목록을 추출합니다.
+
+    입력: html_text는 HTML 문자열, base_url은 상대 링크를 절대 링크로 바꿀 기준 URL입니다.
+    출력: title과 url을 가진 기사 딕셔너리 목록을 반환합니다.
     """
     parser = NaverNewsTitleParser()
     parser.feed(html_text)
@@ -131,9 +140,10 @@ def extract_naver_news_articles(html_text, base_url=NAVER_ECONOMY_NEWS_URL):
 
 
 def extract_naver_newspaper_front_page_articles(html_text, base_url):
-    """?ㅻ챸: ?ㅼ씠踰??좊Ц蹂닿린 HTML?먯꽌 1硫??곸뿭??湲곗궗 ?쒕ぉ怨?URL??異붿텧?⑸땲??
-    ?낅젰: html_text???좊Ц蹂닿린 HTML 臾몄옄?? base_url? ?곷? 留곹겕 蹂댁젙 湲곗? URL?낅땲??
-    異쒕젰: title怨?url??媛吏?1硫?湲곗궗 ?뺤뀛?덈━ 紐⑸줉??諛섑솚?⑸땲??
+    """네이버 신문보기 HTML에서 1면 영역의 기사 제목과 URL을 추출합니다.
+
+    입력: html_text는 신문보기 HTML 문자열, base_url은 상대 링크 보정 기준 URL입니다.
+    출력: title과 url을 가진 1면 기사 딕셔너리 목록을 반환합니다.
     """
     match = re.search(
         r'<div class="newspaper_brick_item[^"]*_start_page[^"]*">(?P<block>[\s\S]*?)(?=\s*<div class="newspaper_brick_item|\Z)',
@@ -141,7 +151,7 @@ def extract_naver_newspaper_front_page_articles(html_text, base_url):
     )
     if not match:
         match = re.search(
-            r'<div class="newspaper_brick_item[^"]*">(?P<block>[\s\S]*?<em>\s*1\s*</em>\s*硫?\s\S]*?)(?=\s*<div class="newspaper_brick_item|\Z)',
+            r'<div class="newspaper_brick_item[^"]*">(?P<block>[\s\S]*?<em>\s*1\s*</em>\s*면[\s\S]*?)(?=\s*<div class="newspaper_brick_item|\Z)',
             html_text,
         )
     if not match:
@@ -168,9 +178,10 @@ def extract_naver_newspaper_front_page_articles(html_text, base_url):
 
 
 def fetch_html(url, timeout=10):
-    """?ㅻ챸: 吏?뺥븳 URL??HTML??User-Agent ?ㅻ뜑? ?④퍡 媛?몄샃?덈떎.
-    ?낅젰: url? ?붿껌 URL, timeout? 珥??⑥쐞 ?ㅽ듃?뚰겕 ?쒗븳 ?쒓컙?낅땲??
-    異쒕젰: ?붿퐫?⑸맂 HTML 臾몄옄?댁쓣 諛섑솚?섍퀬, ?붿껌 ?ㅽ뙣 ??RuntimeError瑜?諛쒖깮?쒗궢?덈떎.
+    """지정한 URL의 HTML을 User-Agent 헤더와 함께 가져옵니다.
+
+    입력: url은 요청 URL, timeout은 초 단위 네트워크 제한 시간입니다.
+    출력: 디코딩된 HTML 문자열을 반환하고, 요청 실패 시 RuntimeError를 발생시킵니다.
     """
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
@@ -182,9 +193,10 @@ def fetch_html(url, timeout=10):
 
 
 def fetch_naver_economy_articles(url=NAVER_ECONOMY_NEWS_URL, limit=DEFAULT_NEWS_TITLE_LIMIT, timeout=10):
-    """?ㅻ챸: ?ㅼ씠踰?寃쎌젣 ?뱀뀡?먯꽌 湲곗궗 紐⑸줉??媛?몄샃?덈떎.
-    ?낅젰: url? 寃쎌젣 ?뱀뀡 URL, limit? 理쒕? 湲곗궗 ?? timeout? ?붿껌 ?쒗븳 ?쒓컙?낅땲??
-    異쒕젰: title怨?url??媛吏?湲곗궗 ?뺤뀛?덈━ 紐⑸줉??諛섑솚?⑸땲??
+    """네이버 경제 섹션에서 기사 목록을 가져옵니다.
+
+    입력: url은 경제 섹션 URL, limit은 최대 기사 수, timeout은 요청 제한 시간입니다.
+    출력: title과 url을 가진 기사 딕셔너리 목록을 반환합니다.
     """
     html_text = fetch_html(url, timeout=timeout)
     articles = extract_naver_news_articles(html_text, base_url=url)
@@ -196,9 +208,10 @@ def fetch_naver_economy_articles(url=NAVER_ECONOMY_NEWS_URL, limit=DEFAULT_NEWS_
 
 
 def fetch_naver_newspaper_front_page_articles(sources=DEFAULT_NEWSPAPER_SOURCES, limit=DEFAULT_NEWS_TITLE_LIMIT, timeout=10):
-    """?ㅻ챸: ?щ윭 ?ㅼ씠踰??좊Ц蹂닿린 異쒖쿂?먯꽌 1硫?湲곗궗 紐⑸줉???섏쭛?⑸땲??
-    ?낅젰: sources??name/url ?뺤뀛?덈━ 紐⑸줉, limit? ?꾩껜 理쒕? 湲곗궗 ?? timeout? ?붿껌 ?쒗븳 ?쒓컙?낅땲??
-    異쒕젰: source_name, title, url??媛吏?湲곗궗 ?뺤뀛?덈━ 紐⑸줉??諛섑솚?⑸땲??
+    """여러 네이버 신문보기 출처에서 1면 기사 목록을 수집합니다.
+
+    입력: sources는 name/url 딕셔너리 목록, limit은 전체 최대 기사 수, timeout은 요청 제한 시간입니다.
+    출력: source_name, title, url을 가진 기사 딕셔너리 목록을 반환합니다.
     """
     articles = []
     for source in sources:
@@ -225,9 +238,10 @@ def fetch_naver_newspaper_front_page_articles(sources=DEFAULT_NEWSPAPER_SOURCES,
 
 
 def fetch_naver_economy_titles(url=NAVER_ECONOMY_NEWS_URL, limit=DEFAULT_NEWS_TITLE_LIMIT, timeout=10):
-    """?ㅻ챸: ?ㅼ씠踰?寃쎌젣 ?뱀뀡 湲곗궗 紐⑸줉?먯꽌 ?쒕ぉ留?媛?몄샃?덈떎.
-    ?낅젰: url? 寃쎌젣 ?뱀뀡 URL, limit? 理쒕? ?쒕ぉ ?? timeout? ?붿껌 ?쒗븳 ?쒓컙?낅땲??
-    異쒕젰: 湲곗궗 ?쒕ぉ 臾몄옄??紐⑸줉??諛섑솚?⑸땲??
+    """네이버 경제 섹션 기사 목록에서 제목만 가져옵니다.
+
+    입력: url은 경제 섹션 URL, limit은 최대 제목 수, timeout은 요청 제한 시간입니다.
+    출력: 기사 제목 문자열 목록을 반환합니다.
     """
     return [
         article["title"]
@@ -239,7 +253,7 @@ def build_news_keyword_response_json_schema(
     keyword_count=NEWS_KEYWORD_COUNT,
     include_learning_content=False,
 ):
-    """?ㅻ챸: ?댁뒪 ?ㅼ썙???꾨낫 異붿텧??JSON ?묐떟 ?ㅽ궎留덈? 留뚮벊?덈떎."""
+    """뉴스 키워드 후보 추출용 JSON 응답 스키마를 만듭니다."""
     properties = {
         "keyword": {"type": "string"},
         "source_url": {"type": "string"},
@@ -344,7 +358,7 @@ def build_news_keyword_prompt(
     keyword_count=NEWS_KEYWORD_COUNT,
     include_learning_content=False,
 ):
-    """?ㅻ챸: 湲곗궗 紐⑸줉??湲곕컲?쇰줈 ?ㅼ썙???꾨낫 異붿텧??LLM ?꾨＼?꾪듃瑜??앹꽦?⑸땲??"""
+    """기사 목록을 기반으로 뉴스 키워드 후보 추출용 LLM 프롬프트를 생성합니다."""
     articles_json = json.dumps(list(articles), ensure_ascii=False, indent=2)
     example_output = json.dumps(
         build_news_keyword_prompt_examples(
@@ -415,9 +429,10 @@ Example output:
 
 
 def parse_news_keyword_candidates(output_text, keyword_count=NEWS_KEYWORD_COUNT):
-    """?ㅻ챸: LLM ?먮Ц ?묐떟?먯꽌 ?ㅼ썙???꾨낫瑜??뚯떛?섍퀬 以묐났???쒓굅?⑸땲??
-    ?낅젰: output_text??LLM ?묐떟 臾몄옄?? keyword_count??理쒕? ?꾨낫 媛쒖닔?낅땲??
-    異쒕젰: keyword, source_url, reason??媛吏??꾨낫 ?뺤뀛?덈━ 紐⑸줉??諛섑솚?⑸땲??
+    """LLM 원문 응답에서 키워드 후보를 파싱하고 중복을 제거합니다.
+
+    입력: output_text는 LLM 응답 문자열, keyword_count는 최대 후보 개수입니다.
+    출력: keyword, source_url, reason을 가진 후보 딕셔너리 목록을 반환합니다.
     """
     candidates = parse_json_candidates(output_text)
     if not candidates:
@@ -447,9 +462,10 @@ def filter_news_keyword_candidates(
     keyword_count=NEWS_KEYWORD_COUNT,
     require_learning_content=False,
 ):
-    """?ㅻ챸: ?꾨낫媛 ?ㅼ젣 湲곗궗 URL怨??쒕ぉ???섑빐 ?룸컺移⑤릺?붿? 寃利앺븯怨??덉쭏 ?꾪꽣瑜??곸슜?⑸땲??
-    ?낅젰: candidates??LLM ?꾨낫 紐⑸줉, articles???먮낯 湲곗궗 紐⑸줉, keyword_count??理쒕? ?꾨낫 媛쒖닔?낅땲??
-    異쒕젰: source_title怨??뺤젣??reason???ы븿???꾨낫 ?뺤뀛?덈━ 紐⑸줉??諛섑솚?⑸땲??
+    """후보가 실제 기사 URL과 제목에 의해 뒷받침되는지 검증하고 필터를 적용합니다.
+
+    입력: candidates는 LLM 후보 목록, articles는 원본 기사 목록, keyword_count는 최대 후보 개수입니다.
+    출력: source_title과 정제된 reason을 포함한 후보 딕셔너리 목록을 반환합니다.
     """
     articles_by_url = {article["url"]: article for article in articles}
     filtered = []
@@ -482,9 +498,10 @@ def filter_news_keyword_candidates(
 
 
 def is_allowed_news_keyword(keyword):
-    """?ㅻ챸: ?ㅼ썙?쒓? 湲몄씠? 理쒖냼 臾몄옄 議곌굔???듦낵?섎뒗吏 ?뺤씤?⑸땲??
-    ?낅젰: keyword??寃?ы븷 ?ㅼ썙??臾몄옄?댁엯?덈떎.
-    異쒕젰: ?덉슜 媛?ν븯硫?True, ?쒖쇅?댁빞 ?섎㈃ False瑜?諛섑솚?⑸땲??
+    """키워드가 길이와 최소 문자 조건을 통과하는지 확인합니다.
+
+    입력: keyword는 검사할 키워드 문자열입니다.
+    출력: 허용 가능하면 True, 제외해야 하면 False를 반환합니다.
     """
     if not keyword:
         return False
@@ -497,9 +514,10 @@ def is_allowed_news_keyword(keyword):
 
 
 def is_keyword_supported_by_title(keyword, title):
-    """?ㅻ챸: ?ㅼ썙?쒓? 湲곗궗 ?쒕ぉ???ы븿?섏뼱 ?덈뒗吏 ?뺤씤?⑸땲??
-    ?낅젰: keyword???꾨낫 ?ㅼ썙?? title? ?먮낯 湲곗궗 ?쒕ぉ?낅땲??
-    異쒕젰: ?쒕ぉ?쇰줈 ?룸컺移⑤릺硫?True, 洹몃젃吏 ?딆쑝硫?False瑜?諛섑솚?⑸땲??
+    """키워드가 기사 제목에 포함되어 있는지 확인합니다.
+
+    입력: keyword는 후보 키워드, title은 원본 기사 제목입니다.
+    출력: 제목으로 뒷받침되면 True, 그렇지 않으면 False를 반환합니다.
     """
     normalized_title = normalize_keyword_match_text(title)
     if not normalized_title:
@@ -510,17 +528,19 @@ def is_keyword_supported_by_title(keyword, title):
 
 
 def normalize_keyword_match_text(value):
-    """?ㅻ챸: ?ㅼ썙??鍮꾧탳瑜??꾪빐 ?쒓?, ?곷Ц, ?レ옄瑜??쒖쇅??臾몄옄瑜??쒓굅?섍퀬 ?뚮Ц?먮줈 諛붽퓠?덈떎.
-    ?낅젰: value??鍮꾧탳 ???臾몄옄?댁엯?덈떎.
-    異쒕젰: 鍮꾧탳?⑹쑝濡??뺢퇋?붾맂 臾몄옄?댁쓣 諛섑솚?⑸땲??
+    """키워드 비교를 위해 한글, 영문, 숫자를 제외한 문자를 제거하고 소문자로 바꿉니다.
+
+    입력: value는 비교 대상 문자열입니다.
+    출력: 비교용으로 정규화된 문자열을 반환합니다.
     """
     return "".join(character for character in str(value).lower() if character.isalnum())
 
 
 def parse_json_candidates(output_text):
-    """?ㅻ챸: LLM ?묐떟?먯꽌 JSON 諛곗뿴 ?먮뒗 ?꾨낫 紐⑸줉 ?꾨뱶瑜?李얠븘 ?뚯떛?⑸땲??
-    ?낅젰: output_text??LLM ?묐떟 臾몄옄?댁엯?덈떎.
-    異쒕젰: ?뚯떛???꾨낫 ?먮낯 紐⑸줉??諛섑솚?섍퀬, ?ㅽ뙣?섎㈃ 鍮?紐⑸줉??諛섑솚?⑸땲??
+    """LLM 응답에서 JSON 배열 또는 후보 목록 필드를 찾아 파싱합니다.
+
+    입력: output_text는 LLM 응답 문자열입니다.
+    출력: 파싱된 후보 원본 목록을 반환하고, 실패하면 빈 목록을 반환합니다.
     """
     text = output_text.strip()
     json_texts = [text]
@@ -550,9 +570,10 @@ def parse_json_candidates(output_text):
 
 
 def parse_line_candidates(output_text):
-    """?ㅻ챸: JSON ?뚯떛???ㅽ뙣???묐떟??以??⑥쐞 ?꾨낫 臾몄옄??紐⑸줉?쇰줈 ?댁꽍?⑸땲??
-    ?낅젰: output_text??LLM ?묐떟 臾몄옄?댁엯?덈떎.
-    異쒕젰: 鍮꾩뼱 ?덉? ?딆? 以??꾨낫 臾몄옄??紐⑸줉??諛섑솚?⑸땲??
+    """JSON 파싱에 실패한 응답을 줄 단위 후보 문자열 목록으로 해석합니다.
+
+    입력: output_text는 LLM 응답 문자열입니다.
+    출력: 비어 있지 않은 줄의 후보 문자열 목록을 반환합니다.
     """
     candidates = []
     for line in output_text.splitlines():
@@ -564,7 +585,7 @@ def parse_line_candidates(output_text):
 
 
 def normalize_optional_candidate_text(value):
-    """?ㅻ챸: ?좏깮 ?꾨뱶??臾몄옄??媛믪쓣 ?뺣━?⑸땲??"""
+    """선택 필드의 문자열 값을 정리합니다."""
     if value is None:
         return ""
     text = html.unescape(str(value))
@@ -573,7 +594,7 @@ def normalize_optional_candidate_text(value):
 
 
 def normalize_quiz_answer(value):
-    """?ㅻ챸: LLM??諛섑솚???뺣떟 ?쒓린瑜?A ?먮뒗 B濡??뺢퇋?뷀빀?덈떎."""
+    """LLM이 반환한 정답 표기를 A 또는 B로 정규화합니다."""
     text = normalize_optional_candidate_text(value).upper().strip(".:)")
     if text in {"A", "OPTION_A", "OPTION A", "QUIZ_OPTION_A"}:
         return "A"
@@ -583,7 +604,7 @@ def normalize_quiz_answer(value):
 
 
 def first_candidate_text(*values):
-    """?ㅻ챸: ?щ윭 ?꾨낫 媛?以?泥?踰덉㎏ 鍮꾩뼱 ?덉? ?딆? 臾몄옄?댁쓣 諛섑솚?⑸땲??"""
+    """여러 후보 값 중 첫 번째로 비어 있지 않은 문자열을 반환합니다."""
     for value in values:
         text = normalize_optional_candidate_text(value)
         if text:
@@ -592,7 +613,7 @@ def first_candidate_text(*values):
 
 
 def normalize_candidate_learning_content(candidate):
-    """?ㅻ챸: ?ㅼ썙???ㅻ챸怨?A/B ?댁쫰 ?꾨뱶瑜??쒖? 援ъ“濡??뺢퇋?뷀빀?덈떎."""
+    """키워드 설명과 A/B 퀴즈 필드를 표준 구조로 정규화합니다."""
     if not isinstance(candidate, dict):
         return {}
 
@@ -656,7 +677,7 @@ def normalize_candidate_learning_content(candidate):
 
 
 def has_complete_candidate_learning_content(candidate):
-    """?ㅻ챸: ?꾨낫???쒖쨪?ㅻ챸怨??꾩꽦??A/B ?댁쫰媛 ?덈뒗吏 ?뺤씤?⑸땲??"""
+    """후보에 표준 설명과 완성된 A/B 퀴즈가 있는지 확인합니다."""
     learning_content = normalize_candidate_learning_content(candidate)
     quiz = learning_content.get("quiz")
     return (
@@ -671,9 +692,10 @@ def has_complete_candidate_learning_content(candidate):
 
 
 def normalize_candidate(candidate):
-    """?ㅻ챸: ?뺤뀛?덈━ ?먮뒗 臾몄옄???꾨낫瑜??쒖? ?꾨낫 ?뺤뀛?덈━ ?뺥깭濡??뺢퇋?뷀빀?덈떎.
-    ?낅젰: candidate??keyword/source_url/reason ?뺤뀛?덈━ ?먮뒗 援щ텇?먮? ?ы븿??臾몄옄?댁엯?덈떎.
-    異쒕젰: keyword, source_url, reason ?ㅻ? 媛吏??뺢퇋?붾맂 ?뺤뀛?덈━瑜?諛섑솚?⑸땲??
+    """딕셔너리 또는 문자열 후보를 표준 후보 딕셔너리 형태로 정규화합니다.
+
+    입력: candidate는 keyword/source_url/reason 딕셔너리 또는 구분자를 포함한 문자열입니다.
+    출력: keyword, source_url, reason 키를 가진 정규화된 딕셔너리를 반환합니다.
     """
     if isinstance(candidate, dict):
         keyword = candidate.get("keyword", "")
@@ -685,7 +707,7 @@ def normalize_candidate(candidate):
         if len(parts) == 3:
             keyword, source_url, reason = parts
         else:
-            match = re.match(r"(.+?)\s+(?:-|??\s+(https?://\S+)\s+(?:-|??\s+(.+)", text)
+            match = re.match(r"(.+?)\s+(?:-|->)\s+(https?://\S+)\s+(?:-|->)\s+(.+)", text)
             if match:
                 keyword = match.group(1)
                 source_url = match.group(2)

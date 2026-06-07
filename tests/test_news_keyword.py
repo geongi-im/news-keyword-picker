@@ -143,8 +143,8 @@ class NewsKeywordParsingTest(unittest.TestCase):
 
     def test_filter_candidates_requires_learning_content_when_requested(self):
         articles = [
-            {"title": "ETF ?좉퇋 ?곸옣", "url": "https://example.com/a"},
-            {"title": "IPO ?곸옣 ?ν뻾", "url": "https://example.com/b"},
+            {"title": "ETF 신규 상장", "url": "https://example.com/a"},
+            {"title": "IPO 상장 흥행", "url": "https://example.com/b"},
         ]
         candidates = [
             {
@@ -193,7 +193,7 @@ class NewsKeywordParsingTest(unittest.TestCase):
 
     def test_build_prompt_can_request_eight_candidates_with_learning_content(self):
         prompt = build_news_keyword_prompt(
-            [{"title": "ETF ?좉퇋 ?곸옣", "url": "https://example.com/a"}],
+            [{"title": "ETF 신규 상장", "url": "https://example.com/a"}],
             keyword_count=NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT,
             include_learning_content=True,
         )

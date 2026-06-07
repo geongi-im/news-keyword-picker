@@ -38,9 +38,10 @@ VIRAL_SELECTION_RESPONSE_JSON_SCHEMA = {
 
 @dataclass(frozen=True)
 class NewsKeywordStorageConfig:
-    """?ㅻ챸: ?댁뒪 ?ㅼ썙??以묐났 寃?ъ? insert???꾩슂????μ냼 ?ㅼ젙?낅땲??
-    ?낅젰: dedupe_table? 以묐났 寃???뚯씠釉? dedupe_column? ?ㅼ썙??而щ읆, target_date?????????좎쭨?낅땲??
-    異쒕젰: ?곗씠?곕쿋?댁뒪 泥섎━ ?④퀎?먯꽌 ?ъ슜?섎뒗 遺덈? ?ㅼ젙 媛앹껜?낅땲??
+    """뉴스 키워드 중복 검사와 insert에 필요한 저장소 설정입니다.
+
+    입력: dedupe_table은 중복 검사 테이블, dedupe_column은 키워드 컬럼, target_date는 저장 날짜입니다.
+    출력: 데이터베이스 처리 단계에서 사용하는 불변 설정 객체입니다.
     """
 
     dedupe_table: str
@@ -49,9 +50,10 @@ class NewsKeywordStorageConfig:
 
 
 def resolve_news_keyword_storage_config():
-    """?ㅻ챸: ?댁뒪 ?ㅼ썙?????泥섎━???ъ슜??湲곕낯 DB ?ㅼ젙??援ъ꽦?⑸땲??
-    ?낅젰: 蹂꾨룄 ?몄옄 ?놁씠 紐⑤뱢 ?곸닔? ?ㅻ뒛 ?좎쭨瑜??ъ슜?⑸땲??
-    異쒕젰: NewsKeywordStorageConfig 媛앹껜瑜?諛섑솚?⑸땲??
+    """뉴스 키워드 저장 처리에 사용할 기본 DB 설정을 구성합니다.
+
+    입력: 별도 인자 없이 모듈 상수와 오늘 날짜를 사용합니다.
+    출력: NewsKeywordStorageConfig 객체를 반환합니다.
     """
     return NewsKeywordStorageConfig(
         dedupe_table=NEWS_KEYWORD_TABLE,
@@ -61,17 +63,19 @@ def resolve_news_keyword_storage_config():
 
 
 def resolve_keyword_target_date():
-    """?ㅻ챸: 理쒖쥌 ?ㅼ썙?쒕? ??ν븷 target_date 媛믪쓣 寃곗젙?⑸땲??
-    ?낅젰: 蹂꾨룄 ?몄옄 ?놁씠 ?꾩옱 ?ㅽ뻾?쇱쓣 ?ъ슜?⑸땲??
-    異쒕젰: yyyy-mm-dd ?뺤떇???좎쭨 臾몄옄?댁쓣 諛섑솚?⑸땲??
+    """최종 키워드를 저장할 target_date 값을 결정합니다.
+
+    입력: 별도 인자 없이 현재 실행일을 사용합니다.
+    출력: yyyy-mm-dd 형식의 날짜 문자열을 반환합니다.
     """
     return date.today().isoformat()
 
 
 def quote_mysql_identifier(identifier, label):
-    """?ㅻ챸: MySQL ?뚯씠釉붾챸 ?먮뒗 而щ읆紐낆쓣 ?덉쟾??諛깊떛 ?앸퀎?먮줈 蹂?섑빀?덈떎.
-    ?낅젰: identifier??寃?ы븷 ?앸퀎??臾몄옄?? label? ?ㅻ쪟 硫붿떆吏???ъ슜???앸퀎??醫낅쪟?낅땲??
-    異쒕젰: 寃利앸맂 ?앸퀎?먮? 諛깊떛?쇰줈 媛먯떬 SQL 議곌컖?쇰줈 諛섑솚?⑸땲??
+    """MySQL 테이블명 또는 컬럼명을 안전한 백틱 식별자로 변환합니다.
+
+    입력: identifier는 검사할 식별자 문자열, label은 오류 메시지에 사용할 식별자 종류입니다.
+    출력: 검증된 식별자를 백틱으로 감싼 SQL 조각으로 반환합니다.
     """
     text = (identifier or "").strip()
     parts = text.split(".")
@@ -86,9 +90,10 @@ def quote_mysql_identifier(identifier, label):
 
 
 def build_keyword_exists_query(table, column):
-    """?ㅻ챸: ?ㅼ썙?쒓? DB???대? 議댁옱?섎뒗吏 ?뺤씤?섎뒗 SELECT 荑쇰━瑜?留뚮벊?덈떎.
-    ?낅젰: table? 議고쉶 ????뚯씠釉붾챸, column? ?ㅼ썙??鍮꾧탳 而щ읆紐낆엯?덈떎.
-    異쒕젰: %(keyword)s ?뚮씪誘명꽣瑜??ъ슜?섎뒗 MySQL SELECT 荑쇰━ 臾몄옄?댁쓣 諛섑솚?⑸땲??
+    """키워드가 DB에 이미 존재하는지 확인하는 SELECT 쿼리를 만듭니다.
+
+    입력: table은 조회 대상 테이블명, column은 키워드 비교 컬럼명입니다.
+    출력: %(keyword)s 파라미터를 사용하는 MySQL SELECT 쿼리 문자열을 반환합니다.
     """
     table_sql = quote_mysql_identifier(table, "table")
     column_sql = quote_mysql_identifier(column, "column")
@@ -101,9 +106,10 @@ def build_keyword_exists_query(table, column):
 
 
 def mark_news_keyword_duplicates(candidates, db_config, table, column):
-    """?ㅻ챸: ?꾨낫 ?ㅼ썙?쒕쭏??DB 以묐났 ?щ?瑜?議고쉶???쒖떆?⑸땲??
-    ?낅젰: candidates???꾨낫 紐⑸줉, db_config??MySQL ?묒냽 ?ㅼ젙, table/column? 以묐났 寃???꾩튂?낅땲??
-    異쒕젰: 媛??꾨낫??exists_in_db 媛믪쓣 異붽??????꾨낫 紐⑸줉??諛섑솚?⑸땲??
+    """후보 키워드마다 DB 중복 여부를 조회해 표시합니다.
+
+    입력: candidates는 후보 목록, db_config는 MySQL 접속 설정, table/column은 중복 검사 위치입니다.
+    출력: 각 후보에 exists_in_db 값을 추가한 후보 목록을 반환합니다.
     """
     query = build_keyword_exists_query(table, column)
     checked = []
@@ -116,17 +122,19 @@ def mark_news_keyword_duplicates(candidates, db_config, table, column):
 
 
 def filter_non_duplicate_news_keyword_candidates(candidates):
-    """?ㅻ챸: DB???대? 議댁옱?섏? ?딅뒗 ?댁뒪 ?ㅼ썙???꾨낫留??④퉩?덈떎.
-    ?낅젰: candidates??exists_in_db 媛믪쓣 ?ы븿?????덈뒗 ?꾨낫 紐⑸줉?낅땲??
-    異쒕젰: exists_in_db媛 李몄씠 ?꾨땶 ?꾨낫 紐⑸줉??諛섑솚?⑸땲??
+    """DB에 이미 존재하지 않는 뉴스 키워드 후보만 남깁니다.
+
+    입력: candidates는 exists_in_db 값을 포함할 수 있는 후보 목록입니다.
+    출력: exists_in_db가 참이 아닌 후보 목록을 반환합니다.
     """
     return [candidate for candidate in candidates if not candidate.get("exists_in_db")]
 
 
 def build_viral_keyword_selection_prompt(candidates):
-    """?ㅻ챸: 以묐났???꾨땶 ?꾨낫 以?理쒖쥌 ?ㅼ썙??1媛쒕? 怨좊Ⅴ寃??섎뒗 LLM ?꾨＼?꾪듃瑜?留뚮벊?덈떎.
-    ?낅젰: candidates??keyword, source_title, source_url, reason 媛믪쓣 媛吏??꾨낫 紐⑸줉?낅땲??
-    異쒕젰: LLM???꾨떖???꾨＼?꾪듃 臾몄옄?댁쓣 諛섑솚?⑸땲??
+    """중복이 아닌 후보 중 최종 키워드 1개를 고르게 하는 LLM 프롬프트를 만듭니다.
+
+    입력: candidates는 keyword, source_title, source_url, reason 값을 가진 후보 목록입니다.
+    출력: LLM에 전달할 프롬프트 문자열을 반환합니다.
     """
     payload = [
         {
@@ -157,9 +165,10 @@ Rules:
 
 
 def select_viral_news_keyword_candidate(candidates, output_dir, llm_client, model=None):
-    """?ㅻ챸: 以묐났???꾨땶 ?꾨낫 以?諛붿씠??媛?μ꽦???믪? 理쒖쥌 ?ㅼ썙??1媛쒕? ?좏깮?⑸땲??
-    ?낅젰: candidates???꾨낫 紐⑸줉, output_dir? LLM ?꾩떆 異쒕젰 ?꾩튂, llm_client??LLM ?몄텧 援ы쁽泥? model? ?좏깮 紐⑤뜽紐낆엯?덈떎.
-    異쒕젰: selection_reason???ы븿??理쒖쥌 ?꾨낫 ?뺤뀛?덈━瑜?諛섑솚?⑸땲??
+    """중복이 아닌 후보 중 바이럴 가능성이 높은 최종 키워드 1개를 선택합니다.
+
+    입력: candidates는 후보 목록, output_dir은 LLM 임시 출력 위치, llm_client는 LLM 호출 구현체, model은 선택 모델명입니다.
+    출력: selection_reason을 포함한 최종 후보 딕셔너리를 반환합니다.
     """
     if not candidates:
         raise RuntimeError("No non-duplicate news keyword candidates are available.")
@@ -186,9 +195,10 @@ def select_viral_news_keyword_candidate(candidates, output_dir, llm_client, mode
 
 
 def parse_selected_viral_keyword_candidate(output_text, candidates):
-    """?ㅻ챸: LLM??理쒖쥌 ?ㅼ썙???좏깮 ?묐떟???뚯떛?섍퀬 ?먮낯 ?꾨낫? 留ㅼ묶?⑸땲??
-    ?낅젰: output_text??LLM ?묐떟 臾몄옄?? candidates???좏깮 媛?ν븳 ?먮낯 ?꾨낫 紐⑸줉?낅땲??
-    異쒕젰: 留ㅼ묶???꾨낫??selection_reason??異붽???諛섑솚?섍퀬, ?ㅽ뙣?섎㈃ None??諛섑솚?⑸땲??
+    """LLM의 최종 키워드 선택 응답을 파싱하고 원본 후보와 매칭합니다.
+
+    입력: output_text는 LLM 응답 문자열, candidates는 선택 가능한 원본 후보 목록입니다.
+    출력: 매칭된 후보에 selection_reason을 추가해 반환하고, 실패하면 None을 반환합니다.
     """
     value = parse_json_value(output_text)
     if isinstance(value, list):
@@ -209,9 +219,10 @@ def parse_selected_viral_keyword_candidate(output_text, candidates):
 
 
 def parse_json_value(output_text):
-    """?ㅻ챸: LLM ?묐떟 臾몄옄?댁뿉??JSON 媛앹껜 ?먮뒗 諛곗뿴 媛믪쓣 異붿텧?⑸땲??
-    ?낅젰: output_text??JSON留??덇굅???욌뮘 濡쒓렇媛 ?욎씤 ?묐떟 臾몄옄?댁엯?덈떎.
-    異쒕젰: ?뚯떛??Python 媛?dict/list ????諛섑솚?섍퀬, ?ㅽ뙣?섎㈃ None??諛섑솚?⑸땲??
+    """LLM 응답 문자열에서 JSON 객체 또는 배열 값을 추출합니다.
+
+    입력: output_text는 JSON만 있거나 앞뒤 로그가 붙은 응답 문자열입니다.
+    출력: 파싱된 Python dict/list 값을 반환하고, 실패하면 None을 반환합니다.
     """
     text = (output_text or "").strip()
     json_texts = [text]
@@ -233,9 +244,10 @@ def parse_json_value(output_text):
 
 
 def find_candidate(candidates, keyword, source_url):
-    """?ㅻ챸: ?좏깮??keyword? source_url????묓븯???먮낯 ?꾨낫瑜?李얠뒿?덈떎.
-    ?낅젰: candidates???먮낯 ?꾨낫 紐⑸줉, keyword/source_url? LLM???좏깮??媛믪엯?덈떎.
-    異쒕젰: ?뺥솗??留ㅼ묶?섎뒗 ?꾨낫瑜?諛섑솚?섍퀬, URL 留ㅼ묶??遺덈챸?뺥븯硫??ㅼ썙???⑥씪 留ㅼ묶 ?꾨낫瑜?諛섑솚?⑸땲??
+    """선택된 keyword와 source_url에 대응하는 원본 후보를 찾습니다.
+
+    입력: candidates는 원본 후보 목록, keyword/source_url은 LLM이 선택한 값입니다.
+    출력: 정확히 매칭되는 후보를 반환하고, URL 매칭이 불명확하면 키워드 단일 매칭 후보를 반환합니다.
     """
     for candidate in candidates:
         if candidate.get("keyword") == keyword and candidate.get("source_url") == source_url:
@@ -250,9 +262,10 @@ def find_candidate(candidates, keyword, source_url):
 
 
 def build_selected_news_keyword_insert_params(selected_candidate, category, target_date):
-    """?ㅻ챸: 理쒖쥌 ?좏깮 ?ㅼ썙?쒕? insert 荑쇰━???꾨떖???뚮씪誘명꽣濡?蹂?섑빀?덈떎.
-    ?낅젰: selected_candidate??理쒖쥌 ?꾨낫, category?????移댄뀒怨좊━, target_date?????????좎쭨?낅땲??
-    異쒕젰: MySQL execute???꾨떖???뚮씪誘명꽣 ?뺤뀛?덈━瑜?諛섑솚?⑸땲??
+    """최종 선택 키워드를 insert 쿼리에 전달할 파라미터로 변환합니다.
+
+    입력: selected_candidate는 최종 후보, category는 저장 카테고리, target_date는 저장 날짜입니다.
+    출력: MySQL execute에 전달할 파라미터 딕셔너리를 반환합니다.
     """
     return {
         "category": category,
@@ -269,9 +282,10 @@ def build_selected_news_keyword_insert_params(selected_candidate, category, targ
 
 
 def insert_selected_news_keyword(db_config, selected_candidate, target_date):
-    """?ㅻ챸: 理쒖쥌 ?좏깮 ?ㅼ썙?쒕? 吏?뺣맂 移댄뀒怨좊━?ㅻ줈 MySQL????ν빀?덈떎.
-    ?낅젰: db_config??MySQL ?묒냽 ?ㅼ젙, selected_candidate??理쒖쥌 ?꾨낫, target_date?????????좎쭨?낅땲??
-    異쒕젰: 移댄뀒怨좊━蹂?affected_rows? lastrowid瑜?媛吏?insert 寃곌낵 紐⑸줉??諛섑솚?⑸땲??
+    """최종 선택 키워드를 지정된 카테고리들로 MySQL에 저장합니다.
+
+    입력: db_config는 MySQL 접속 설정, selected_candidate는 최종 후보, target_date는 저장 날짜입니다.
+    출력: 카테고리별 affected_rows와 lastrowid를 가진 insert 결과 목록을 반환합니다.
     """
     insert_results = []
     with connect_mysql(db_config) as connection:
@@ -356,9 +370,10 @@ def run_news_keyword_selection_process(
     insert_publish_content=False,
     insert_news_quiz=False,
 ):
-    """?ㅻ챸: ?꾨낫 以묒뿉??理쒖쥌 ?ㅼ썙??1媛쒕? ?좏깮?섍퀬, ?듭뀡???곕씪 MySQL insert瑜??ㅽ뻾?⑸땲??
-    ?낅젰: candidates???ㅼ썙???꾨낫 紐⑸줉, args??CLI ?듭뀡, root_dir? ?꾨줈?앺듃 猷⑦듃, output_dir? LLM 異쒕젰 ?꾩튂, llm_client??LLM ?몄텧 援ы쁽泥댁엯?덈떎.
-    異쒕젰: 以묐났 寃??寃곌낵, ?좏깮 媛???꾨낫, 理쒖쥌 ?꾨낫, target_date, insert 寃곌낵瑜??댁? ?뺤뀛?덈━瑜?諛섑솚?⑸땲??
+    """후보 중 최종 키워드 1개를 선택하고, 옵션에 따라 MySQL insert를 실행합니다.
+
+    입력: candidates는 키워드 후보 목록, args는 CLI 옵션, root_dir은 프로젝트 루트, output_dir은 LLM 출력 위치, llm_client는 LLM 호출 구현체입니다.
+    출력: 중복 검사 결과, 선택 가능 후보, 최종 후보, target_date, insert 결과를 담은 딕셔너리를 반환합니다.
     """
     storage_config = resolve_news_keyword_storage_config()
     db_config = None

@@ -105,13 +105,13 @@ class KeywordSelectionTest(unittest.TestCase):
                 "source_title": "ETF title",
                 "source_url": "https://example.com/a",
                 "reason": "candidate reason",
-                "keyword_description": "LLM ETF ??살구",
+                "keyword_description": "LLM ETF 설명",
                 "quiz": {
-                    "question": "LLM ETF 筌욌뜄揆",
-                    "option_a": "LLM ?醫뤾문 A",
-                    "option_b": "LLM ?醫뤾문 B",
+                    "question": "LLM ETF 질문",
+                    "option_a": "LLM 선택 A",
+                    "option_b": "LLM 선택 B",
                     "answer": "A",
-                    "explanation": "LLM ?醫뤾문 A揶쎛 筌띿쉶????곸???낅빍??",
+                    "explanation": "LLM 선택 A가 맞는 이유입니다.",
                 },
             },
             {
@@ -283,16 +283,16 @@ class KeywordSelectionTest(unittest.TestCase):
         candidates = [
             {
                 "keyword": "ETF",
-                "source_title": "ETF ?좉퇋 ?곸옣",
+                "source_title": "ETF 신규 상장",
                 "source_url": "https://example.com/a",
                 "reason": "candidate reason",
-                "keyword_description": "LLM ETF ?ㅻ챸",
+                "keyword_description": "LLM ETF 설명",
                 "quiz": {
-                    "question": "LLM ETF 吏덈Ц",
-                    "option_a": "LLM ?좏깮 A",
-                    "option_b": "LLM ?좏깮 B",
+                    "question": "LLM ETF 질문",
+                    "option_a": "LLM 선택 A",
+                    "option_b": "LLM 선택 B",
                     "answer": "A",
-                    "explanation": "LLM ?좏깮 A媛 留욌뒗 ?댁쑀?낅땲??",
+                    "explanation": "LLM 선택 A가 맞는 이유입니다.",
                 },
             }
         ]
@@ -311,14 +311,14 @@ class KeywordSelectionTest(unittest.TestCase):
         llm_client = FakeSelectionLLMClient(
             json.dumps(
                 {
-                    "keyword_description": "LLM ETF ?ㅻ챸",
-                    "reason": "LLM ETF ?좎젙 洹쇨굅",
+                    "keyword_description": "LLM ETF 설명",
+                    "reason": "LLM ETF 선정 근거",
                     "quiz": {
-                        "question": "LLM ETF 吏덈Ц",
-                        "option_a": "LLM ?좏깮 A",
-                        "option_b": "LLM ?좏깮 B",
+                        "question": "LLM ETF 질문",
+                        "option_a": "LLM 선택 A",
+                        "option_b": "LLM 선택 B",
                         "answer": "A",
-                        "explanation": "LLM ?좏깮 A媛 留욌뒗 ?댁쑀?낅땲??",
+                        "explanation": "LLM 선택 A가 맞는 이유입니다.",
                     },
                 },
                 ensure_ascii=False,
@@ -336,10 +336,10 @@ class KeywordSelectionTest(unittest.TestCase):
 
         selected = result["selected_candidate"]
         self.assertIn("keyword_description", selected)
-        self.assertEqual(selected["keyword_description"], "LLM ETF ?ㅻ챸")
+        self.assertEqual(selected["keyword_description"], "LLM ETF 설명")
         self.assertEqual(selected["selection_reason"], "candidate reason")
         self.assertEqual(selected["quiz"]["answer"], "A")
-        self.assertEqual(selected["quiz"]["explanation"], "LLM ?좏깮 A媛 留욌뒗 ?댁쑀?낅땲??")
+        self.assertEqual(selected["quiz"]["explanation"], "LLM 선택 A가 맞는 이유입니다.")
         self.assertIn("quiz", result["checked_candidates"][0])
         insert_selected_news_keyword.assert_called_once()
         inserted_candidate = insert_selected_news_keyword.call_args.kwargs["selected_candidate"]
