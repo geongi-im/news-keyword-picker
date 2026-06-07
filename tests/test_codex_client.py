@@ -32,7 +32,17 @@ class CodexLLMClientTest(unittest.TestCase):
             client = CodexLLMClient()
 
             with self.assertRaisesRegex(RuntimeError, "exit_code=2"):
-                client.generate_text(prompt="prompt", output_dir=Path("output"))
+                client.generate_text(
+                    prompt="prompt",
+                    output_dir=Path("output"),
+                    model="gpt-test",
+                )
+
+    def test_generate_text_raises_when_model_is_missing(self):
+        client = CodexLLMClient()
+
+        with self.assertRaisesRegex(ValueError, "LLM model is required"):
+            client.generate_text(prompt="prompt", output_dir=Path("output"))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 ﻿import argparse
 import html
+import os
 import sys
 from pathlib import Path
 
@@ -8,8 +9,6 @@ from pymysql import MySQLError
 
 from llm_provider import (
     DEFAULT_REASONING_EFFORT_ATTEMPTS,
-    LLM_PROVIDER_ENV,
-    SUPPORTED_LLM_PROVIDERS,
     create_llm_client,
 )
 from keyword_selection import run_news_keyword_selection_process
@@ -24,7 +23,20 @@ from news_keyword import (
     filter_news_keyword_candidates,
     parse_news_keyword_candidates,
 )
-from telegram_util import TelegramUtil
+from utils.common_util import validate_required_environment
+from utils.logger_util import LoggerUtil
+from utils.telegram_util import TelegramUtil
+
+
+REQUIRED_ENV_NAMES = [
+    "LLM_PROVIDER",
+    "LLM_MODEL",
+    "NEWS_MIN_ARTICLE_COUNT",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID",
+]
+
+NEWS_MIN_ARTICLE_COUNT_ENV = "NEWS_MIN_ARTICLE_COUNT"
 
 
 def resolve_output_dir(root_dir, output_dir):
@@ -53,14 +65,9 @@ def parse_args(argv):
     )
     parser.add_argument(
         "--news-keyword-model",
-        help="LLM model used to extract Naver news keyword candidates. Defaults depend on the selected provider.",
-    )
-    parser.add_argument(
-        "--llm-provider",
-        choices=SUPPORTED_LLM_PROVIDERS,
         help=(
-            f"Override {LLM_PROVIDER_ENV} for extracting Naver news keyword candidates. "
-            f"Supported: {', '.join(SUPPORTED_LLM_PROVIDERS)}."
+            "LLM model used to extract and select Naver news keyword candidates. "
+            "Overrides the provider default for this run."
         ),
     )
     parser.add_argument(
@@ -115,17 +122,59 @@ def resolve_min_news_keyword_candidate_count(args):
     return NEWS_KEYWORD_COUNT
 
 
-def suggest_news_keyword_candidates(args, output_dir, llm_client=None):
+def resolve_min_news_article_count(env=None):
+    """설명: 수집해야 하는 최소 기사 개수를 환경변수에서 읽습니다."""
+    env = env if env is not None else os.environ
+    raw_count = (env.get(NEWS_MIN_ARTICLE_COUNT_ENV) or "").strip()
+    try:
+        count = int(raw_count)
+    except ValueError as exc:
+        raise ValueError(
+            f"{NEWS_MIN_ARTICLE_COUNT_ENV} must be a positive integer."
+        ) from exc
+
+    if count < 1:
+        raise ValueError(f"{NEWS_MIN_ARTICLE_COUNT_ENV} must be greater than 0.")
+    return count
+
+
+def validate_news_article_count(articles, min_article_count):
+    """설명: 수집된 기사 개수가 환경변수 기준을 만족하는지 확인합니다."""
+    article_count = len(articles)
+    if article_count < min_article_count:
+        raise RuntimeError(
+            f"Expected at least {min_article_count} news articles, but got {article_count}."
+        )
+
+
+def suggest_news_keyword_candidates(args, output_dir, llm_client=None, logger=None):
     """설명: 네이버 신문보기 1면 기사를 수집하고 LLM으로 키워드 후보를 추출합니다.
     입력: args는 CLI 옵션, output_dir은 임시 출력 디렉터리, llm_client는 선택적으로 주입하는 LLM 클라이언트입니다.
     출력: 품질 필터를 통과한 키워드 후보 목록을 반환합니다.
     """
     sources = resolve_news_keyword_sources(args)
+    if logger:
+        logger.info(
+            "news_fetch_started sources=%s title_limit=%s",
+            [source["name"] for source in sources],
+            args.news_title_limit,
+        )
     articles = fetch_naver_newspaper_front_page_articles(
         sources=sources,
         limit=args.news_title_limit,
     )
     print(f"news_titles_fetched: {len(articles)}")
+    if logger:
+        logger.info("news_fetch_completed article_count=%s", len(articles))
+
+    min_article_count = resolve_min_news_article_count()
+    validate_news_article_count(articles, min_article_count)
+    if logger:
+        logger.info(
+            "news_article_count_validated article_count=%s min_required=%s",
+            len(articles),
+            min_article_count,
+        )
 
     candidate_count = resolve_news_keyword_candidate_count(args)
     min_candidate_count = resolve_min_news_keyword_candidate_count(args)
@@ -136,7 +185,7 @@ def suggest_news_keyword_candidates(args, output_dir, llm_client=None):
         include_learning_content=include_learning_content,
     )
     if llm_client is None:
-        llm_client = create_llm_client(args.llm_provider)
+        llm_client = create_llm_client()
     candidates, output = extract_news_keyword_candidates(
         args,
         output_dir,
@@ -146,10 +195,23 @@ def suggest_news_keyword_candidates(args, output_dir, llm_client=None):
         candidate_count=candidate_count,
         min_candidate_count=min_candidate_count,
         include_learning_content=include_learning_content,
+        logger=logger,
     )
     if len(candidates) >= min_candidate_count:
+        if logger:
+            logger.info(
+                "candidate_filter_completed accepted_count=%s min_required=%s",
+                len(candidates),
+                min_candidate_count,
+            )
         return candidates
 
+    if logger:
+        logger.warning(
+            "candidate_filter_failed accepted_count=%s min_required=%s",
+            len(candidates),
+            min_candidate_count,
+        )
     raise RuntimeError(
         f"Expected at least {min_candidate_count} news keyword candidates after quality filtering, "
         f"but got {len(candidates)}. output={output!r}"
@@ -165,6 +227,7 @@ def extract_news_keyword_candidates(
     candidate_count=NEWS_KEYWORD_COUNT,
     min_candidate_count=NEWS_KEYWORD_COUNT,
     include_learning_content=False,
+    logger=None,
 ):
     """설명: LLM 응답을 파싱하고 필터링하며, 후보 수가 부족하면 한 번 재시도합니다.
     입력: args는 CLI 옵션, output_dir은 출력 디렉터리, articles는 원본 기사 목록, prompt는 LLM 프롬프트, llm_client는 LLM 호출 구현체입니다.
@@ -175,10 +238,19 @@ def extract_news_keyword_candidates(
     candidates = []
 
     for index, reasoning_effort in enumerate(attempts, start=1):
+        model = args.news_keyword_model or llm_client.default_model
+        if logger:
+            logger.info(
+                "llm_keyword_generation_started attempt=%s reasoning_effort=%s model=%s candidate_count=%s",
+                index,
+                reasoning_effort,
+                model,
+                candidate_count,
+            )
         output = llm_client.generate_text(
             prompt=prompt,
             output_dir=output_dir,
-            model=args.news_keyword_model or llm_client.default_model,
+            model=model,
             reasoning_effort=reasoning_effort,
             response_json_schema=build_news_keyword_response_json_schema(
                 keyword_count=candidate_count,
@@ -198,6 +270,13 @@ def extract_news_keyword_candidates(
             keyword_count=candidate_count,
             require_learning_content=include_learning_content,
         )
+        if logger:
+            logger.info(
+                "llm_keyword_generation_completed attempt=%s parsed_count=%s accepted_count=%s",
+                index,
+                len(parsed_candidates),
+                len(candidates),
+            )
         if len(candidates) >= min_candidate_count:
             return candidates, output
         if index < len(attempts):
@@ -206,6 +285,12 @@ def extract_news_keyword_candidates(
                 f"accepted={len(candidates)} "
                 f"reasoning_effort={attempts[index]}"
             )
+            if logger:
+                logger.warning(
+                    "llm_keyword_generation_retry accepted_count=%s next_reasoning_effort=%s",
+                    len(candidates),
+                    attempts[index],
+                )
 
     return candidates, last_output
 
@@ -404,16 +489,41 @@ def main(argv=None):
     입력: argv는 선택 CLI 인자 리스트이며, None이면 sys.argv 값을 사용합니다.
     출력: 프로세스 종료 코드로 사용할 정수를 반환합니다.
     """
-    args = parse_args(argv or sys.argv[1:])
+    cli_args = argv if argv is not None else sys.argv[1:]
+    args = parse_args(cli_args)
     root_dir = Path(__file__).resolve().parent.parent
+    logger = LoggerUtil(log_dir=root_dir / "logs").get_logger()
+    logger.info(
+        "program_started argv=%s output_dir=%s send_telegram=%s telegram_test=%s insert_publish_content=%s insert_news_quiz=%s",
+        list(cli_args),
+        args.output_dir,
+        args.send_telegram,
+        args.telegram_test,
+        args.insert_publish_content,
+        args.insert_news_quiz,
+    )
 
     try:
         validate_args(args)
         load_dotenv(root_dir / ".env")
+        logger.info("environment_loaded env_path=%s", root_dir / ".env")
+        validate_required_environment(REQUIRED_ENV_NAMES)
+        logger.info("environment_validated required_env_names=%s", REQUIRED_ENV_NAMES)
         output_dir = resolve_output_dir(root_dir, args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        llm_client = create_llm_client(args.llm_provider)
-        candidates = suggest_news_keyword_candidates(args, output_dir, llm_client)
+        logger.info("output_dir_ready path=%s", output_dir)
+        llm_client = create_llm_client()
+        logger.info(
+            "llm_client_created provider=%s default_model=%s",
+            getattr(llm_client, "provider", ""),
+            getattr(llm_client, "default_model", ""),
+        )
+        candidates = suggest_news_keyword_candidates(
+            args,
+            output_dir,
+            llm_client,
+            logger=logger,
+        )
         print_news_keyword_candidates(candidates)
         selection_result = run_news_keyword_selection_process(
             candidates=candidates,
@@ -424,18 +534,34 @@ def main(argv=None):
             insert_publish_content=args.insert_publish_content,
             insert_news_quiz=args.insert_news_quiz,
         )
+        logger.info(
+            "selection_completed selected_keyword=%s target_date=%s insert_count=%s news_quiz_inserted=%s",
+            selection_result["selected_candidate"].get("keyword", ""),
+            selection_result["target_date"],
+            len(selection_result["insert_result"]),
+            bool(selection_result.get("news_quiz_insert_result")),
+        )
         print_news_keyword_selection_insert_result(selection_result)
         if args.send_telegram:
+            logger.info(
+                "telegram_send_started test_chat=%s selected_keyword=%s",
+                args.telegram_test,
+                selection_result["selected_candidate"].get("keyword", ""),
+            )
             send_selected_news_keyword_to_telegram(
                 selection_result["selected_candidate"],
                 use_test_chat=args.telegram_test,
             )
             print("telegram_sent: true")
+            logger.info("telegram_send_completed")
+        logger.info("program_completed exit_code=0")
         return 0
     except (FileNotFoundError, ValueError, RuntimeError, MySQLError) as exc:
+        logger.exception("program_failed exit_code=2")
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
+        logger.warning("program_interrupted exit_code=130")
         print("Interrupted.", file=sys.stderr)
         return 130
 

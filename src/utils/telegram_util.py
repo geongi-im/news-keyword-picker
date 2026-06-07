@@ -1,11 +1,13 @@
 ﻿import os
 import urllib.parse
+from pathlib import Path
 from urllib.request import urlopen
 
 from dotenv import load_dotenv
 
 
-load_dotenv()
+ROOT_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(ROOT_DIR / ".env")
 
 
 class TelegramUtil:

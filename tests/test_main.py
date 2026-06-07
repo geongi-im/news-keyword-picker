@@ -1,19 +1,36 @@
 import json
+import os
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from main import (
+    NEWS_MIN_ARTICLE_COUNT_ENV,
+    REQUIRED_ENV_NAMES,
     extract_news_keyword_candidates,
     format_news_keyword_candidates_message,
     format_selected_news_keyword_message,
     main as run_main,
     parse_args,
+    resolve_min_news_article_count,
+    resolve_min_news_keyword_candidate_count,
+    validate_news_article_count,
     validate_args,
 )
+from news_keyword import NEWS_KEYWORD_COUNT
+from utils.common_util import validate_required_environment
+
+
+REQUIRED_ENV_VALUES = {
+    "LLM_PROVIDER": "codex",
+    "LLM_MODEL": "gpt-test",
+    NEWS_MIN_ARTICLE_COUNT_ENV: "3",
+    "TELEGRAM_BOT_TOKEN": "telegram-token",
+    "TELEGRAM_CHAT_ID": "telegram-chat-id",
+}
 
 
 class FakeLLMClient:
@@ -46,10 +63,10 @@ class FakeLLMClient:
 
 
 class MainLLMFlowTest(unittest.TestCase):
-    def test_parse_args_leaves_llm_provider_to_env_by_default(self):
+    def test_parse_args_has_no_llm_provider_override(self):
         args = parse_args([])
 
-        self.assertIsNone(args.llm_provider)
+        self.assertFalse(hasattr(args, "llm_provider"))
 
     def test_parse_args_accepts_insert_publish_content_flag(self):
         args = parse_args(["--insert-publish-content"])
@@ -65,6 +82,60 @@ class MainLLMFlowTest(unittest.TestCase):
         args = parse_args([])
 
         self.assertIsNone(validate_args(args))
+
+    def test_validate_required_environment_requires_requested_variable(self):
+        with self.assertRaises(ValueError) as context:
+            validate_required_environment(REQUIRED_ENV_NAMES, env={})
+
+        message = str(context.exception)
+        for required_name in REQUIRED_ENV_NAMES:
+            self.assertIn(required_name, message)
+
+    def test_validate_required_environment_allows_requested_variable(self):
+        result = validate_required_environment(
+            REQUIRED_ENV_NAMES,
+            env=REQUIRED_ENV_VALUES,
+        )
+
+        self.assertIsNone(result)
+
+    def test_validate_required_environment_allows_empty_required_list(self):
+        result = validate_required_environment([], env={})
+
+        self.assertIsNone(result)
+
+    def test_resolve_min_news_keyword_candidate_count_uses_fixed_threshold(self):
+        args = SimpleNamespace()
+
+        self.assertEqual(resolve_min_news_keyword_candidate_count(args), NEWS_KEYWORD_COUNT)
+
+    def test_resolve_min_news_article_count_reads_required_environment(self):
+        self.assertEqual(
+            resolve_min_news_article_count({NEWS_MIN_ARTICLE_COUNT_ENV: "3"}),
+            3,
+        )
+
+    def test_resolve_min_news_article_count_rejects_invalid_values(self):
+        with self.assertRaisesRegex(ValueError, NEWS_MIN_ARTICLE_COUNT_ENV):
+            resolve_min_news_article_count({NEWS_MIN_ARTICLE_COUNT_ENV: "abc"})
+
+        self.assertEqual(
+            resolve_min_news_article_count({NEWS_MIN_ARTICLE_COUNT_ENV: "1"}),
+            1,
+        )
+
+        with self.assertRaisesRegex(ValueError, "greater than 0"):
+            resolve_min_news_article_count({NEWS_MIN_ARTICLE_COUNT_ENV: "0"})
+
+    def test_validate_news_article_count_requires_configured_minimum(self):
+        articles = [
+            {"title": "one", "url": "https://example.com/1"},
+            {"title": "two", "url": "https://example.com/2"},
+        ]
+
+        self.assertIsNone(validate_news_article_count(articles, 2))
+        with self.assertRaisesRegex(RuntimeError, "Expected at least 3 news articles"):
+            validate_news_article_count(articles, 3)
 
     def test_format_selected_news_keyword_message_includes_selected_fields(self):
         selected = {
@@ -135,6 +206,21 @@ class MainLLMFlowTest(unittest.TestCase):
         self.assertNotIn("선정 근거", message)
         self.assertNotIn("candidate reason", message)
 
+    def test_main_returns_error_when_required_environment_is_missing(self):
+        with (
+            patch("main.load_dotenv"),
+            patch.dict(os.environ, {}, clear=True),
+            patch("main.create_llm_client") as create_llm_client,
+            redirect_stdout(StringIO()),
+            redirect_stderr(StringIO()) as stderr,
+        ):
+            exit_code = run_main([])
+
+        self.assertEqual(exit_code, 2)
+        for required_name in REQUIRED_ENV_NAMES:
+            self.assertIn(required_name, stderr.getvalue())
+        create_llm_client.assert_not_called()
+
     def test_main_sends_selected_keyword_when_selection_is_enabled(self):
         candidates = [
             {
@@ -159,6 +245,7 @@ class MainLLMFlowTest(unittest.TestCase):
 
         with (
             patch("main.load_dotenv"),
+            patch.dict(os.environ, REQUIRED_ENV_VALUES, clear=True),
             patch("main.create_llm_client", return_value=SimpleNamespace(default_model="test")),
             patch("main.suggest_news_keyword_candidates", return_value=candidates),
             patch("main.print_news_keyword_candidates"),
@@ -200,6 +287,7 @@ class MainLLMFlowTest(unittest.TestCase):
 
         with (
             patch("main.load_dotenv"),
+            patch.dict(os.environ, REQUIRED_ENV_VALUES, clear=True),
             patch("main.create_llm_client", return_value=SimpleNamespace(default_model="test")),
             patch("main.suggest_news_keyword_candidates", return_value=candidates),
             patch("main.print_news_keyword_candidates"),
@@ -241,6 +329,7 @@ class MainLLMFlowTest(unittest.TestCase):
 
         with (
             patch("main.load_dotenv"),
+            patch.dict(os.environ, REQUIRED_ENV_VALUES, clear=True),
             patch("main.create_llm_client", return_value=SimpleNamespace(default_model="test")),
             patch("main.suggest_news_keyword_candidates", return_value=candidates),
             patch("main.print_news_keyword_candidates"),
@@ -288,7 +377,7 @@ class MainLLMFlowTest(unittest.TestCase):
                 llm_client=llm_client,
             )
 
-        self.assertEqual(len(candidates), 5)
+        self.assertEqual(len(candidates), NEWS_KEYWORD_COUNT)
         self.assertEqual(output, second_output)
         self.assertEqual([call["reasoning_effort"] for call in llm_client.calls], ["low", "medium"])
         self.assertEqual([call["model"] for call in llm_client.calls], ["test-model", "test-model"])

@@ -2,9 +2,8 @@ import os
 from dataclasses import dataclass
 from typing import Mapping, Protocol
 
-from codex_client import CODEX_LLM_PROVIDER, CodexLLMClient, DEFAULT_CODEX_MODEL
+from codex_client import CODEX_LLM_PROVIDER, CodexLLMClient
 from gemini_client import (
-    DEFAULT_GEMINI_MODEL,
     GEMINI_API_KEY_ENV,
     GEMINI_LLM_PROVIDER,
     GeminiLLMClient,
@@ -12,7 +11,6 @@ from gemini_client import (
 from news_keyword import build_news_keyword_response_json_schema
 
 
-DEFAULT_LLM_PROVIDER = CODEX_LLM_PROVIDER
 LLM_PROVIDER_ENV = "LLM_PROVIDER"
 SUPPORTED_LLM_PROVIDERS = (CODEX_LLM_PROVIDER, GEMINI_LLM_PROVIDER)
 DEFAULT_REASONING_EFFORT_ATTEMPTS = ("low", "medium")
@@ -23,7 +21,7 @@ class LLMProviderClient(Protocol):
     """설명: provider별 LLM 클라이언트가 따라야 하는 호출 규약입니다."""
 
     provider: str
-    default_model: str
+    default_model: str | None
 
     def generate_text(
         self,
@@ -95,21 +93,16 @@ def normalize_llm_provider(provider):
     입력: provider는 사용자 입력 또는 환경변수에서 읽은 provider 이름입니다.
     출력: 정규화된 provider 이름을 반환하고, 미지원 값이면 ValueError를 발생시킵니다.
     """
-    normalized_provider = (provider or DEFAULT_LLM_PROVIDER).strip().lower()
+    if not (provider or "").strip():
+        supported = ", ".join(SUPPORTED_LLM_PROVIDERS)
+        raise ValueError(f"Missing LLM provider. env={LLM_PROVIDER_ENV}, supported={supported}")
+
+    normalized_provider = provider.strip().lower()
     if normalized_provider in SUPPORTED_LLM_PROVIDERS:
         return normalized_provider
 
     supported = ", ".join(SUPPORTED_LLM_PROVIDERS)
     raise ValueError(f"Unsupported LLM provider: {provider}. supported={supported}")
-
-
-def resolve_llm_provider(provider=None, env=None):
-    """설명: CLI 인자, 환경변수, 기본값 순서로 사용할 LLM provider를 결정합니다.
-    입력: provider는 명시적으로 전달된 provider 이름, env는 환경변수 매핑이며 생략 시 os.environ을 사용합니다.
-    출력: 정규화된 provider 이름을 반환합니다.
-    """
-    env = env if env is not None else os.environ
-    return normalize_llm_provider(provider or env.get(LLM_PROVIDER_ENV) or DEFAULT_LLM_PROVIDER)
 
 
 def create_llm_clients(env=None):
@@ -118,20 +111,24 @@ def create_llm_clients(env=None):
     출력: provider 이름을 키로 갖는 LLM provider 클라이언트 딕셔너리를 반환합니다.
     """
     env = env if env is not None else os.environ
+    llm_model = env.get("LLM_MODEL") or None
     return {
-        CODEX_LLM_PROVIDER: CodexLLMClient(),
+        CODEX_LLM_PROVIDER: CodexLLMClient(
+            default_model=llm_model,
+        ),
         GEMINI_LLM_PROVIDER: GeminiLLMClient(
             api_key=env.get(GEMINI_API_KEY_ENV),
+            default_model=llm_model,
             response_json_schema=NEWS_KEYWORD_RESPONSE_JSON_SCHEMA,
         ),
     }
 
 
-def create_llm_client(provider=None, env=None):
-    """설명: 환경변수 또는 인자로 선택된 provider를 사용하는 메인 LLMClient를 생성합니다.
-    입력: provider는 환경변수를 덮어쓸 provider 이름, env는 환경변수 매핑이며 생략 시 os.environ을 사용합니다.
+def create_llm_client(env=None):
+    """설명: 환경변수로 선택된 provider를 사용하는 메인 LLMClient를 생성합니다.
+    입력: env는 환경변수 매핑이며 생략 시 os.environ을 사용합니다.
     출력: 선택된 provider로 라우팅하는 LLMClient 객체를 반환합니다.
     """
     env = env if env is not None else os.environ
-    selected_provider = resolve_llm_provider(provider=provider, env=env)
+    selected_provider = normalize_llm_provider(env.get(LLM_PROVIDER_ENV))
     return LLMClient(provider=selected_provider, clients=create_llm_clients(env=env))

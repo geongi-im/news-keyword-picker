@@ -3,7 +3,6 @@ from dataclasses import dataclass
 
 GEMINI_LLM_PROVIDER = "gemini"
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
-DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 
 
 @dataclass(frozen=True)
@@ -14,7 +13,7 @@ class GeminiLLMClient:
     response_json_schema: dict | None = None
     response_mime_type: str = "application/json"
     provider: str = GEMINI_LLM_PROVIDER
-    default_model: str = DEFAULT_GEMINI_MODEL
+    default_model: str | None = None
 
     def generate_text(
         self,
@@ -29,9 +28,13 @@ class GeminiLLMClient:
         입력: prompt는 LLM 요청 문자열, output_dir은 인터페이스 호환용 값, model은 사용할 모델명, reasoning_effort는 현재 Gemini 호출에서는 사용하지 않는 값입니다.
         출력: Gemini가 생성한 응답 문자열을 반환하고, 빈 응답이면 RuntimeError를 발생시킵니다.
         """
+        selected_model = model or self.default_model
+        if not selected_model:
+            raise ValueError("LLM model is required.")
+
         output = run_gemini_generate_content(
             prompt=prompt,
-            model=model or self.default_model,
+            model=selected_model,
             api_key=self.api_key,
             response_json_schema=(
                 response_json_schema

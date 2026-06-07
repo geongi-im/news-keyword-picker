@@ -9,9 +9,6 @@ import tempfile
 CODEX_LLM_PROVIDER = "codex"
 CODEX_BIN = "codex"
 CODEX_KEYWORD_SANDBOX = "read-only"
-CODEX_KEYWORD_REASONING_EFFORT = "low"
-CODEX_KEYWORD_RETRY_REASONING_EFFORT = "medium"
-DEFAULT_CODEX_MODEL = "gpt-5.4-mini"
 
 
 @dataclass(frozen=True)
@@ -21,7 +18,7 @@ class CodexLLMClient:
     sandbox: str = CODEX_KEYWORD_SANDBOX
     ignore_user_config: bool = True
     provider: str = CODEX_LLM_PROVIDER
-    default_model: str = DEFAULT_CODEX_MODEL
+    default_model: str | None = None
 
     def generate_text(
         self,
@@ -36,10 +33,14 @@ class CodexLLMClient:
         입력: prompt는 LLM 요청 문자열, output_dir은 임시 출력 디렉터리, model은 사용할 모델명, reasoning_effort는 추론 강도입니다.
         출력: Codex가 생성한 응답 문자열을 반환하고, 실행 실패 시 RuntimeError를 발생시킵니다.
         """
+        selected_model = model or self.default_model
+        if not selected_model:
+            raise ValueError("LLM model is required.")
+
         exit_code, output = run_codex_exec_last_message(
             prompt=prompt,
             output_dir=Path(output_dir),
-            model=model or self.default_model,
+            model=selected_model,
             sandbox=self.sandbox,
             reasoning_effort=reasoning_effort,
             ignore_user_config=self.ignore_user_config,

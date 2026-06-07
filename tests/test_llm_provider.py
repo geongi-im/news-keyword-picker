@@ -44,25 +44,54 @@ class LLMClientTest(unittest.TestCase):
 
     def test_create_llm_client_rejects_unsupported_provider(self):
         with self.assertRaisesRegex(ValueError, "Unsupported LLM provider"):
-            create_llm_client("unsupported")
+            create_llm_client(env={LLM_PROVIDER_ENV: "unsupported"})
 
-    def test_create_llm_client_uses_codex_by_default(self):
+    def test_create_llm_client_rejects_missing_provider(self):
         with patch.dict(os.environ, {}, clear=True):
-            client = create_llm_client()
+            with self.assertRaisesRegex(ValueError, "Missing LLM provider"):
+                create_llm_client()
+
+    def test_create_llm_client_supports_codex_provider(self):
+        client = create_llm_client(
+            env={
+                LLM_PROVIDER_ENV: "codex",
+                "LLM_MODEL": "gpt-env",
+            }
+        )
 
         self.assertEqual(client.provider, "codex")
         self.assertIsInstance(client.selected_client, CodexLLMClient)
+        self.assertEqual(client.selected_client.default_model, "gpt-env")
+
+    def test_create_llm_client_uses_llm_model_env_for_gemini(self):
+        client = create_llm_client(
+            env={
+                LLM_PROVIDER_ENV: "gemini",
+                "LLM_MODEL": "gemini-env",
+            }
+        )
+
+        self.assertEqual(client.provider, "gemini")
+        self.assertIsInstance(client.selected_client, GeminiLLMClient)
+        self.assertEqual(client.selected_client.default_model, "gemini-env")
 
     def test_create_llm_client_supports_gemini_provider(self):
-        client = create_llm_client("gemini")
+        client = create_llm_client(
+            env={
+                LLM_PROVIDER_ENV: "gemini",
+                "LLM_MODEL": "gemini-env",
+            }
+        )
 
         self.assertIsInstance(client, LLMClient)
         self.assertEqual(client.provider, "gemini")
         self.assertIsInstance(client.selected_client, GeminiLLMClient)
+        self.assertEqual(client.selected_client.default_model, "gemini-env")
 
     def test_create_llm_client_uses_env_provider_and_api_key(self):
         env = {
             LLM_PROVIDER_ENV: "gemini",
+            "LLM_MODEL": "gemini-env",
             GEMINI_API_KEY_ENV: "secret",
         }
 

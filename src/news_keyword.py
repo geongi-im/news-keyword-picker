@@ -14,10 +14,9 @@ DEFAULT_NEWSPAPER_SOURCES = (
     {"name": "서울경제", "url": "https://media.naver.com/press/011/newspaper"},
     {"name": "한국경제", "url": "https://media.naver.com/press/015/newspaper"}
 )
-DEFAULT_NEWS_KEYWORD_MODEL = "gpt-5.4-mini"
 DEFAULT_NEWS_TITLE_LIMIT = 30
-NEWS_KEYWORD_COUNT = 5
-NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT = 8
+NEWS_KEYWORD_COUNT = 3
+NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT = 5
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -730,5 +729,4 @@ def normalize_candidate(candidate):
     }
     normalized.update(normalize_candidate_learning_content(candidate))
     return normalized
-
 

@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gemini_client import (
-    DEFAULT_GEMINI_MODEL,
     GeminiLLMClient,
     build_gemini_generation_config,
     run_gemini_generate_content,
@@ -18,22 +17,36 @@ class GeminiLLMClientTest(unittest.TestCase):
             "gemini_client.run_gemini_generate_content",
             return_value='[{"keyword":"ETF","source_url":"https://x","reason":"r"}]',
         ) as run:
-            client = GeminiLLMClient(api_key="secret", response_json_schema={"type": "array"})
+            client = GeminiLLMClient(
+                api_key="secret",
+                default_model="gemini-env",
+                response_json_schema={"type": "array"},
+            )
             result = client.generate_text(prompt="prompt", model=None)
 
         self.assertEqual(result, '[{"keyword":"ETF","source_url":"https://x","reason":"r"}]')
         run.assert_called_once()
         self.assertEqual(run.call_args.kwargs["prompt"], "prompt")
-        self.assertEqual(run.call_args.kwargs["model"], DEFAULT_GEMINI_MODEL)
+        self.assertEqual(run.call_args.kwargs["model"], "gemini-env")
         self.assertEqual(run.call_args.kwargs["api_key"], "secret")
         self.assertEqual(run.call_args.kwargs["response_json_schema"], {"type": "array"})
+
+    def test_generate_text_raises_when_model_is_missing(self):
+        client = GeminiLLMClient()
+
+        with self.assertRaisesRegex(ValueError, "LLM model is required"):
+            client.generate_text(prompt="prompt", output_dir=Path("output"))
 
     def test_generate_text_raises_when_gemini_returns_empty_response(self):
         with patch("gemini_client.run_gemini_generate_content", return_value=""):
             client = GeminiLLMClient()
 
             with self.assertRaisesRegex(RuntimeError, "empty response"):
-                client.generate_text(prompt="prompt", output_dir=Path("output"))
+                client.generate_text(
+                    prompt="prompt",
+                    output_dir=Path("output"),
+                    model="gemini-env",
+                )
 
 
 class GeminiGenerationTest(unittest.TestCase):

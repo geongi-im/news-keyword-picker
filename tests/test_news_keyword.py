@@ -191,7 +191,7 @@ class NewsKeywordParsingTest(unittest.TestCase):
         self.assertNotIn("\\ucf54\\uc2a4\\ud53c", prompt)
 
 
-    def test_build_prompt_can_request_eight_candidates_with_learning_content(self):
+    def test_build_prompt_can_request_learning_candidates_with_learning_content(self):
         prompt = build_news_keyword_prompt(
             [{"title": "ETF 신규 상장", "url": "https://example.com/a"}],
             keyword_count=NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT,
@@ -202,7 +202,10 @@ class NewsKeywordParsingTest(unittest.TestCase):
             include_learning_content=True,
         )
 
-        self.assertIn("Select exactly 8", prompt)
+        self.assertIn(
+            f"Select exactly {NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT}",
+            prompt,
+        )
         self.assertIn('"keyword_description"', prompt)
         self.assertIn('"quiz"', prompt)
         self.assertIn('"explanation"', prompt)
@@ -215,7 +218,7 @@ class NewsKeywordParsingTest(unittest.TestCase):
         self.assertIn("confuse direct and indirect effects", prompt)
         self.assertIn("무관", prompt)
         self.assertIn("second-order effect or tradeoff", prompt)
-        self.assertEqual(schema["minItems"], 8)
+        self.assertEqual(schema["minItems"], NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT)
         self.assertIn("quiz", schema["items"]["required"])
 
 
