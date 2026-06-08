@@ -72,7 +72,7 @@ def parse_args(argv):
     )
     parser.add_argument(
         "--news-keyword-url",
-        help="Optional single Naver newspaper page URL to crawl instead of the default three economy newspapers.",
+        help="Optional single Naver newspaper page URL to crawl instead of the default newspaper sources.",
     )
     parser.add_argument(
         "--news-title-limit",
@@ -296,7 +296,7 @@ def extract_news_keyword_candidates(
 
 
 def resolve_news_keyword_sources(args):
-    """설명: 사용자 지정 URL 또는 기본 경제지 URL 목록을 수집 대상 목록으로 변환합니다.
+    """설명: 사용자 지정 URL 또는 기본 신문보기 URL 목록을 수집 대상 목록으로 변환합니다.
     입력: args는 news_keyword_url 옵션을 포함한 CLI 옵션 객체입니다.
     출력: name과 url을 가진 수집 대상 딕셔너리 목록을 반환합니다.
     """
@@ -402,7 +402,7 @@ def format_news_keyword_candidates_message(candidates):
     입력: candidates는 keyword, source_title, source_url, reason 값을 가진 후보 목록입니다.
     출력: Telegram parse_mode=html에 사용할 메시지 문자열을 반환합니다.
     """
-    blocks = ["<b>경제지 1면 키워드 후보</b>"]
+    blocks = ["<b>신문보기 1면 키워드 후보</b>"]
     for index, candidate in enumerate(candidates, start=1):
         keyword = html.escape(candidate["keyword"])
         source_title = html.escape(candidate.get("source_title", ""))

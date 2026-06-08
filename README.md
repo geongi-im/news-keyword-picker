@@ -1,6 +1,6 @@
 ﻿# news-keyword-picker
 
-네이버 경제지 신문보기 1면 기사 제목을 수집하고, 환경변수로 선택한 LLM provider(Codex CLI 또는 Gemini API)로 오늘의 경제뉴스 퀴즈용 최종 뉴스 1개를 선정하는 독립 프로젝트입니다.
+네이버 신문보기에서 지정 신문사들의 1면 기사 제목을 수집하고, 환경변수로 선택한 LLM provider(Codex CLI 또는 Gemini API)로 오늘의 경제뉴스 퀴즈용 최종 뉴스 1개를 선정하는 독립 프로젝트입니다.
 
 ## 실행
 
@@ -72,7 +72,7 @@ $env:PYTHONPATH="src"
 python -m pytest
 ```
 
-## 기본 수집 대상
+## 기본 신문보기 수집 대상
 
 - 파이낸셜뉴스: `https://media.naver.com/press/014/newspaper`
 - 머니투데이: `https://media.naver.com/press/008/newspaper`
@@ -83,7 +83,7 @@ python -m pytest
 
 ```text
 --news-keyword-model  키워드 후보 추출과 최종 선정에 사용할 LLM 모델입니다. 실제 호출 모델로 우선 사용됩니다.
---news-keyword-url    기본 수집 대상 대신 단일 네이버 신문보기 URL을 수집합니다.
+--news-keyword-url    기본 신문보기 수집 대상 대신 단일 네이버 신문보기 URL을 수집합니다.
 --news-title-limit    LLM에 전달할 기사 제목 개수 상한입니다. 기본값: 30
 --send-telegram       최종 선정된 오늘의 경제뉴스 퀴즈를 텔레그램으로 전송합니다.
 --telegram-test       TELEGRAM_CHAT_ID 대신 TELEGRAM_CHAT_TEST_ID로 전송합니다.
@@ -138,7 +138,7 @@ MYSQL_CHARSET=utf8mb4
 
 `LLM_MODEL`은 provider와 무관하게 필수입니다. 실제 호출 모델은 CLI `--news-keyword-model`, `LLM_MODEL` 환경변수 순서로 결정됩니다.
 
-`NEWS_MIN_ARTICLE_COUNT`는 네이버 신문보기에서 최소 몇 개의 원본 기사를 수집해야 하는지 정하는 1 이상의 정수입니다. 수집 기사 수가 이 값보다 적으면 후보 생성 전에 실패합니다.
+`NEWS_MIN_ARTICLE_COUNT`는 기본 또는 사용자 지정 네이버 신문보기 URL에서 최소 몇 개의 원본 기사를 수집해야 하는지 정하는 1 이상의 정수입니다. 수집 기사 수가 이 값보다 적으면 후보 생성 전에 실패합니다.
 
 `TELEGRAM_CHAT_TEST_ID`는 `--telegram-test`를 사용할 때만 필요합니다.
 

@@ -4,10 +4,8 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from html.parser import HTMLParser
 
 
-NAVER_ECONOMY_NEWS_URL = "https://news.naver.com/section/101"
 DEFAULT_NEWSPAPER_SOURCES = (
     {"name": "파이낸셜뉴스", "url": "https://media.naver.com/press/014/newspaper"},
     {"name": "머니투데이", "url": "https://media.naver.com/press/008/newspaper"},
@@ -24,74 +22,6 @@ USER_AGENT = (
 )
 
 
-class NaverNewsTitleParser(HTMLParser):
-    """네이버 경제 뉴스 HTML에서 기사 제목 링크를 수집하는 HTMLParser 구현체입니다.
-
-    입력: feed 메서드로 HTML 문자열을 입력받습니다.
-    출력: articles 속성에 title과 url을 가진 기사 딕셔너리 목록을 누적합니다.
-    """
-
-    def __init__(self):
-        """파서 상태와 수집 결과 저장소를 초기화합니다.
-
-        입력: 별도 인자를 받지 않습니다.
-        출력: 빈 articles 목록과 캡처 상태를 가진 파서 인스턴스를 구성합니다.
-        """
-        super().__init__(convert_charrefs=True)
-        self.articles = []
-        self._capture_depth = 0
-        self._current_url = ""
-        self._parts = []
-
-    def handle_starttag(self, tag, attrs):
-        """제목 링크로 판단되는 a 태그를 만나면 텍스트 캡처를 시작합니다.
-
-        입력: tag는 태그명, attrs는 HTML 속성 튜플 목록입니다.
-        출력: 내부 캡처 상태를 갱신하고 None을 반환합니다.
-        """
-        if self._capture_depth:
-            self._capture_depth += 1
-            return
-
-        if tag != "a":
-            return
-
-        attrs_by_name = dict(attrs)
-        class_names = attrs_by_name.get("class", "").split()
-        if "sa_text_title" in class_names:
-            self._capture_depth = 1
-            self._current_url = attrs_by_name.get("href", "")
-            self._parts = []
-
-    def handle_endtag(self, tag):
-        """캡처 중인 태그가 끝나면 제목과 URL을 기사 목록에 추가합니다.
-
-        입력: tag는 닫힘 HTML 태그명입니다.
-        출력: articles 목록과 내부 상태를 갱신하고 None을 반환합니다.
-        """
-        if not self._capture_depth:
-            return
-
-        self._capture_depth -= 1
-        if self._capture_depth:
-            return
-
-        title = normalize_title(" ".join(self._parts))
-        if title:
-            self.articles.append({"title": title, "url": self._current_url})
-        self._current_url = ""
-        self._parts = []
-
-    def handle_data(self, data):
-        """캡처 중인 제목 텍스트 조각을 임시 목록에 저장합니다.
-
-        입력: data는 HTMLParser가 전달한 텍스트 조각입니다.
-        출력: 내부 텍스트 조각 목록을 갱신하고 None을 반환합니다.
-        """
-        if self._capture_depth:
-            self._parts.append(data)
-
-
 def normalize_title(value):
     """HTML 엔티티, 태그, 중복 공백을 제거해 기사 제목 문자열을 정규화합니다.
 
@@ -102,40 +32,6 @@ def normalize_title(value):
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
-
-
-def extract_naver_news_titles(html_text):
-    """네이버 경제 뉴스 HTML에서 기사 제목만 추출합니다.
-
-    입력: html_text는 네이버 뉴스 HTML 문자열입니다.
-    출력: 중복 제거된 기사 제목 문자열 목록을 반환합니다.
-    """
-    return [article["title"] for article in extract_naver_news_articles(html_text)]
-
-
-def extract_naver_news_articles(html_text, base_url=NAVER_ECONOMY_NEWS_URL):
-    """네이버 경제 뉴스 HTML에서 제목과 URL을 가진 기사 목록을 추출합니다.
-
-    입력: html_text는 HTML 문자열, base_url은 상대 링크를 절대 링크로 바꿀 기준 URL입니다.
-    출력: title과 url을 가진 기사 딕셔너리 목록을 반환합니다.
-    """
-    parser = NaverNewsTitleParser()
-    parser.feed(html_text)
-
-    articles = []
-    seen = set()
-    for article in parser.articles:
-        title = article["title"]
-        if title in seen:
-            continue
-        seen.add(title)
-        articles.append(
-            {
-                "title": title,
-                "url": urllib.parse.urljoin(base_url, article["url"]),
-            }
-        )
-    return articles
 
 
 def extract_naver_newspaper_front_page_articles(html_text, base_url):
@@ -191,21 +87,6 @@ def fetch_html(url, timeout=10):
         raise RuntimeError(f"Failed to fetch news page: {url}: {exc}") from exc
 
 
-def fetch_naver_economy_articles(url=NAVER_ECONOMY_NEWS_URL, limit=DEFAULT_NEWS_TITLE_LIMIT, timeout=10):
-    """네이버 경제 섹션에서 기사 목록을 가져옵니다.
-
-    입력: url은 경제 섹션 URL, limit은 최대 기사 수, timeout은 요청 제한 시간입니다.
-    출력: title과 url을 가진 기사 딕셔너리 목록을 반환합니다.
-    """
-    html_text = fetch_html(url, timeout=timeout)
-    articles = extract_naver_news_articles(html_text, base_url=url)
-    if limit:
-        articles = articles[:limit]
-    if not articles:
-        raise ValueError(f"No Naver economy news titles found from {url}")
-    return articles
-
-
 def fetch_naver_newspaper_front_page_articles(sources=DEFAULT_NEWSPAPER_SOURCES, limit=DEFAULT_NEWS_TITLE_LIMIT, timeout=10):
     """여러 네이버 신문보기 출처에서 1면 기사 목록을 수집합니다.
 
@@ -235,17 +116,6 @@ def fetch_naver_newspaper_front_page_articles(sources=DEFAULT_NEWSPAPER_SOURCES,
         raise ValueError(f"No Naver newspaper front-page articles found from: {source_urls}")
     return articles
 
-
-def fetch_naver_economy_titles(url=NAVER_ECONOMY_NEWS_URL, limit=DEFAULT_NEWS_TITLE_LIMIT, timeout=10):
-    """네이버 경제 섹션 기사 목록에서 제목만 가져옵니다.
-
-    입력: url은 경제 섹션 URL, limit은 최대 제목 수, timeout은 요청 제한 시간입니다.
-    출력: 기사 제목 문자열 목록을 반환합니다.
-    """
-    return [
-        article["title"]
-        for article in fetch_naver_economy_articles(url=url, limit=limit, timeout=timeout)
-    ]
 
 
 def build_news_keyword_response_json_schema(
@@ -729,4 +599,3 @@ def normalize_candidate(candidate):
     }
     normalized.update(normalize_candidate_learning_content(candidate))
     return normalized
-
