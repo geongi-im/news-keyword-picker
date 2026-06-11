@@ -142,11 +142,11 @@ MYSQL_CHARSET=utf8mb4
 
 `TELEGRAM_CHAT_TEST_ID`는 `--telegram-test`를 사용할 때만 필요합니다.
 
-최종 insert는 아래 쿼리와 같은 형태로 두 번 실행됩니다. `target_date`는 실행일 기준 오늘 날짜가 들어갑니다.
+최종 insert는 아래 쿼리와 같은 형태로 두 번 실행됩니다. `target_date`는 실행일 기준 오늘 날짜가 들어가고, `comment`에는 뉴스 원문 URL이 들어갑니다.
 
 ```sql
-INSERT INTO n8n_publish_content(category, keyword, target_date) VALUES("3초퀴즈", {선정된키워드}, {yyyy-mm-dd});
-INSERT INTO n8n_publish_content(category, keyword, target_date) VALUES("자녀에게설명하기", {선정된키워드}, {yyyy-mm-dd});
+INSERT INTO n8n_publish_content(category, keyword, target_date, `comment`) VALUES("3초퀴즈", {선정된키워드}, {yyyy-mm-dd}, {뉴스원문URL});
+INSERT INTO n8n_publish_content(category, keyword, target_date, `comment`) VALUES("자녀에게설명하기", {선정된키워드}, {yyyy-mm-dd}, {뉴스원문URL});
 ```
 
 ## LLM 구조

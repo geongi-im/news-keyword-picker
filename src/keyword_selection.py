@@ -11,8 +11,8 @@ NEWS_KEYWORD_TABLE = "n8n_publish_content"
 NEWS_KEYWORD_DEDUPE_COLUMN = "keyword"
 NEWS_KEYWORD_INSERT_CATEGORIES = ("3초퀴즈", "자녀에게설명하기")
 NEWS_KEYWORD_INSERT_QUERY = (
-    "INSERT INTO n8n_publish_content(category, keyword, target_date) "
-    "VALUES(%(category)s, %(keyword)s, %(target_date)s)"
+    "INSERT INTO n8n_publish_content(category, keyword, target_date, `comment`) "
+    "VALUES(%(category)s, %(keyword)s, %(target_date)s, %(comment)s)"
 )
 NEWS_QUIZ_INSERT_QUERY = (
     "INSERT INTO mq_news_quiz("
@@ -271,6 +271,7 @@ def build_selected_news_keyword_insert_params(selected_candidate, category, targ
         "category": category,
         "keyword": selected_candidate.get("keyword", ""),
         "target_date": target_date,
+        "comment": selected_candidate.get("source_url", ""),
         "source_title": selected_candidate.get("source_title", ""),
         "source_url": selected_candidate.get("source_url", ""),
         "reason": selected_candidate.get("selection_reason")

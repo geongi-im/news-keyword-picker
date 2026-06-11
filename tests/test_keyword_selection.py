@@ -183,8 +183,22 @@ class KeywordSelectionTest(unittest.TestCase):
         self.assertTrue(connection.committed)
         self.assertFalse(connection.rolled_back)
         self.assertEqual([item["category"] for item in result], ["3초퀴즈", "자녀에게설명하기"])
+        queries = [execution[0] for execution in connection.cursor_instance.executions]
+        self.assertEqual(
+            queries,
+            [
+                "INSERT INTO n8n_publish_content(category, keyword, target_date, `comment`) "
+                "VALUES(%(category)s, %(keyword)s, %(target_date)s, %(comment)s)",
+                "INSERT INTO n8n_publish_content(category, keyword, target_date, `comment`) "
+                "VALUES(%(category)s, %(keyword)s, %(target_date)s, %(comment)s)",
+            ],
+        )
         params = [execution[1] for execution in connection.cursor_instance.executions]
         self.assertEqual([param["keyword"] for param in params], ["ETF", "ETF"])
+        self.assertEqual(
+            [param["comment"] for param in params],
+            ["https://example.com/a", "https://example.com/a"],
+        )
         self.assertEqual(
             [param["target_date"] for param in params],
             ["2026-06-01", "2026-06-01"],
@@ -198,6 +212,7 @@ class KeywordSelectionTest(unittest.TestCase):
         )
 
         self.assertEqual(params["reason"], "candidate reason")
+        self.assertEqual(params["comment"], "")
         self.assertEqual(params["category"], "3초퀴즈")
         self.assertEqual(params["target_date"], "2026-06-01")
 
