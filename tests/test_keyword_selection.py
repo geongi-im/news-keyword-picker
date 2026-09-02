@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 from keyword_selection import (
     build_keyword_exists_query,
+    build_viral_keyword_selection_prompt,
+    prefer_single_word_keyword_candidates,
     build_selected_news_quiz_insert_params,
     build_selected_news_keyword_insert_params,
     insert_selected_news_quiz,
@@ -140,6 +142,119 @@ class KeywordSelectionTest(unittest.TestCase):
         self.assertEqual(selected["source_title"], "IPO title")
         self.assertEqual(selected["selection_reason"], "selection reason")
         self.assertEqual(llm_client.calls[0]["response_mime_type"], "application/json")
+
+    def test_select_viral_keyword_candidate_prefers_single_word_keyword(self):
+        candidates = [
+            {
+                "keyword": "전기 요금",
+                "source_title": "전기 요금 인상",
+                "source_url": "https://example.com/a",
+                "reason": "candidate reason a",
+            },
+            {
+                "keyword": "코스피",
+                "source_title": "코스피 8000선 돌파",
+                "source_url": "https://example.com/b",
+                "reason": "candidate reason b",
+            },
+        ]
+        llm_client = FakeSelectionLLMClient("")
+
+        selected = select_viral_news_keyword_candidate(
+            candidates,
+            output_dir=Path("output"),
+            llm_client=llm_client,
+        )
+
+        self.assertEqual(selected["keyword"], "코스피")
+        self.assertEqual(selected["selection_reason"], "candidate reason b")
+        self.assertEqual(llm_client.calls, [])
+
+    def test_select_viral_keyword_candidate_asks_llm_among_single_word_candidates(self):
+        candidates = [
+            {
+                "keyword": "전기 요금",
+                "source_title": "전기 요금 인상",
+                "source_url": "https://example.com/a",
+                "reason": "candidate reason a",
+            },
+            {
+                "keyword": "코스피",
+                "source_title": "코스피 8000선 돌파",
+                "source_url": "https://example.com/b",
+                "reason": "candidate reason b",
+            },
+            {
+                "keyword": "ETF",
+                "source_title": "ETF 신규 상장",
+                "source_url": "https://example.com/c",
+                "reason": "candidate reason c",
+            },
+        ]
+        output = json.dumps(
+            {
+                "keyword": "ETF",
+                "source_url": "https://example.com/c",
+                "reason": "selection reason",
+            }
+        )
+        llm_client = FakeSelectionLLMClient(output)
+
+        selected = select_viral_news_keyword_candidate(
+            candidates,
+            output_dir=Path("output"),
+            llm_client=llm_client,
+        )
+
+        prompt = llm_client.calls[0]["prompt"]
+        self.assertEqual(selected["keyword"], "ETF")
+        self.assertIn("코스피", prompt)
+        self.assertNotIn("전기 요금", prompt)
+
+    def test_select_viral_keyword_candidate_falls_back_to_fewest_words(self):
+        candidates = [
+            {
+                "keyword": "전기 요금 인상",
+                "source_title": "전기 요금 인상 확정",
+                "source_url": "https://example.com/a",
+                "reason": "candidate reason a",
+            },
+            {
+                "keyword": "주택 공급",
+                "source_title": "주택 공급 대책 발표",
+                "source_url": "https://example.com/b",
+                "reason": "candidate reason b",
+            },
+        ]
+        llm_client = FakeSelectionLLMClient("")
+
+        selected = select_viral_news_keyword_candidate(
+            candidates,
+            output_dir=Path("output"),
+            llm_client=llm_client,
+        )
+
+        self.assertEqual(selected["keyword"], "주택 공급")
+        self.assertEqual(llm_client.calls, [])
+
+    def test_prefer_single_word_keyword_candidates_keeps_all_when_keywords_are_empty(self):
+        candidates = [{"keyword": ""}, {"keyword": "  "}]
+
+        self.assertEqual(prefer_single_word_keyword_candidates(candidates), candidates)
+
+    def test_selection_prompt_requires_single_word_preference(self):
+        prompt = build_viral_keyword_selection_prompt(
+            [
+                {
+                    "keyword": "코스피",
+                    "source_title": "코스피 8000선 돌파",
+                    "source_url": "https://example.com/a",
+                    "reason": "candidate reason",
+                }
+            ]
+        )
+
+        self.assertIn("single word with no spaces", prompt)
 
     def test_parse_selected_candidate_allows_unique_keyword_match(self):
         candidates = [

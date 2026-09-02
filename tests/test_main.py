@@ -17,10 +17,12 @@ from main import (
     parse_args,
     resolve_min_news_article_count,
     resolve_min_news_keyword_candidate_count,
+    resolve_news_body_char_limit,
+    suggest_news_keyword_candidates,
     validate_news_article_count,
     validate_args,
 )
-from news_keyword import NEWS_KEYWORD_COUNT
+from news_keyword import DEFAULT_ARTICLE_BODY_CHAR_LIMIT, NEWS_KEYWORD_COUNT
 from utils.common_util import validate_required_environment
 
 
@@ -82,6 +84,80 @@ class MainLLMFlowTest(unittest.TestCase):
         args = parse_args([])
 
         self.assertIsNone(validate_args(args))
+
+    def test_parse_args_crawls_article_body_by_default(self):
+        args = parse_args([])
+
+        self.assertEqual(args.news_body_char_limit, DEFAULT_ARTICLE_BODY_CHAR_LIMIT)
+        self.assertEqual(resolve_news_body_char_limit(args), DEFAULT_ARTICLE_BODY_CHAR_LIMIT)
+
+    def test_resolve_news_body_char_limit_allows_disabling_body_crawl(self):
+        args = parse_args(["--news-body-char-limit", "0"])
+
+        self.assertEqual(resolve_news_body_char_limit(args), 0)
+        self.assertIsNone(validate_args(args))
+
+    def test_validate_args_rejects_negative_news_body_char_limit(self):
+        args = parse_args(["--news-body-char-limit", "-1"])
+
+        with self.assertRaisesRegex(ValueError, "--news-body-char-limit"):
+            validate_args(args)
+
+    def test_resolve_news_body_char_limit_falls_back_to_default(self):
+        self.assertEqual(
+            resolve_news_body_char_limit(SimpleNamespace()),
+            DEFAULT_ARTICLE_BODY_CHAR_LIMIT,
+        )
+        self.assertEqual(
+            resolve_news_body_char_limit(SimpleNamespace(news_body_char_limit=None)),
+            DEFAULT_ARTICLE_BODY_CHAR_LIMIT,
+        )
+
+    def test_suggest_news_keyword_candidates_attaches_article_bodies(self):
+        articles = [
+            {"title": "전기요금 인상", "url": "https://example.com/a"},
+            {"title": "코스피 8000선 돌파", "url": "https://example.com/b"},
+            {"title": "ETF 신규 상장", "url": "https://example.com/c"},
+        ]
+        articles_with_body = [
+            {**article, "body": f"{article['title']} 본문입니다."} for article in articles
+        ]
+        args = parse_args(["--news-body-char-limit", "500"])
+
+        with (
+            patch("main.fetch_naver_newspaper_front_page_articles", return_value=articles),
+            patch(
+                "main.attach_naver_article_bodies",
+                return_value=articles_with_body,
+            ) as attach_bodies,
+            patch("main.extract_news_keyword_candidates", return_value=([{"keyword": "x"}] * 3, "")),
+            patch.dict(os.environ, REQUIRED_ENV_VALUES, clear=True),
+            redirect_stdout(StringIO()) as stdout,
+        ):
+            suggest_news_keyword_candidates(args, Path("output"), llm_client=SimpleNamespace())
+
+        self.assertEqual(attach_bodies.call_args.kwargs["char_limit"], 500)
+        self.assertEqual(attach_bodies.call_args.args[0], articles)
+        self.assertIn("news_bodies_fetched: 3/3", stdout.getvalue())
+
+    def test_suggest_news_keyword_candidates_can_skip_article_bodies(self):
+        articles = [
+            {"title": "전기요금 인상", "url": "https://example.com/a"},
+            {"title": "코스피 8000선 돌파", "url": "https://example.com/b"},
+            {"title": "ETF 신규 상장", "url": "https://example.com/c"},
+        ]
+        args = parse_args(["--news-body-char-limit", "0"])
+
+        with (
+            patch("main.fetch_naver_newspaper_front_page_articles", return_value=articles),
+            patch("main.attach_naver_article_bodies") as attach_bodies,
+            patch("main.extract_news_keyword_candidates", return_value=([{"keyword": "x"}] * 3, "")),
+            patch.dict(os.environ, REQUIRED_ENV_VALUES, clear=True),
+            redirect_stdout(StringIO()),
+        ):
+            suggest_news_keyword_candidates(args, Path("output"), llm_client=SimpleNamespace())
+
+        attach_bodies.assert_not_called()
 
     def test_validate_required_environment_requires_requested_variable(self):
         with self.assertRaises(ValueError) as context:

@@ -13,12 +13,15 @@ from llm_provider import (
 )
 from keyword_selection import run_news_keyword_selection_process
 from news_keyword import (
+    DEFAULT_ARTICLE_BODY_CHAR_LIMIT,
     DEFAULT_NEWSPAPER_SOURCES,
     DEFAULT_NEWS_TITLE_LIMIT,
     NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT,
     NEWS_KEYWORD_COUNT,
+    attach_naver_article_bodies,
     build_news_keyword_prompt,
     build_news_keyword_response_json_schema,
+    count_articles_with_body,
     fetch_naver_newspaper_front_page_articles,
     filter_news_keyword_candidates,
     parse_news_keyword_candidates,
@@ -81,6 +84,15 @@ def parse_args(argv):
         help="Maximum number of Naver news titles to send to the LLM.",
     )
     parser.add_argument(
+        "--news-body-char-limit",
+        type=int,
+        default=DEFAULT_ARTICLE_BODY_CHAR_LIMIT,
+        help=(
+            "Maximum number of article body characters crawled per article and sent to the LLM. "
+            "Use 0 to skip article body crawling and analyze titles only."
+        ),
+    )
+    parser.add_argument(
         "--send-telegram",
         action="store_true",
         help="Send the final selected news quiz to Telegram.",
@@ -110,6 +122,8 @@ def validate_args(args):
     """
     if args.news_title_limit < 1:
         raise ValueError("--news-title-limit must be greater than 0.")
+    if args.news_body_char_limit < 0:
+        raise ValueError("--news-body-char-limit must be 0 or greater.")
 
 
 def resolve_news_keyword_candidate_count(args):
@@ -120,6 +134,17 @@ def resolve_news_keyword_candidate_count(args):
 def resolve_min_news_keyword_candidate_count(args):
     """설명: 필터 후 실행을 계속할 최소 후보 개수를 결정합니다."""
     return NEWS_KEYWORD_COUNT
+
+
+def resolve_news_body_char_limit(args):
+    """설명: 기사 본문을 몇 글자까지 수집해 LLM에 넘길지 결정합니다.
+    입력: args는 news_body_char_limit 옵션을 포함할 수 있는 CLI 옵션 객체입니다.
+    출력: 본문 최대 글자 수를 반환하고, 0이면 본문 수집을 건너뜁니다.
+    """
+    limit = getattr(args, "news_body_char_limit", DEFAULT_ARTICLE_BODY_CHAR_LIMIT)
+    if limit is None:
+        return DEFAULT_ARTICLE_BODY_CHAR_LIMIT
+    return max(0, int(limit))
 
 
 def resolve_min_news_article_count(env=None):
@@ -175,6 +200,30 @@ def suggest_news_keyword_candidates(args, output_dir, llm_client=None, logger=No
             len(articles),
             min_article_count,
         )
+
+    body_char_limit = resolve_news_body_char_limit(args)
+    if body_char_limit:
+        if logger:
+            logger.info(
+                "article_body_fetch_started article_count=%s char_limit=%s",
+                len(articles),
+                body_char_limit,
+            )
+        articles = attach_naver_article_bodies(
+            articles,
+            char_limit=body_char_limit,
+            logger=logger,
+        )
+        body_count = count_articles_with_body(articles)
+        print(f"news_bodies_fetched: {body_count}/{len(articles)}")
+        if logger:
+            logger.info(
+                "article_body_fetch_completed body_count=%s article_count=%s",
+                body_count,
+                len(articles),
+            )
+        if not body_count and logger:
+            logger.warning("article_body_fetch_empty article_count=%s", len(articles))
 
     candidate_count = resolve_news_keyword_candidate_count(args)
     min_candidate_count = resolve_min_news_keyword_candidate_count(args)

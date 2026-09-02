@@ -1,6 +1,6 @@
 ﻿# news-keyword-picker
 
-네이버 신문보기에서 지정 신문사들의 1면 기사 제목을 수집하고, 환경변수로 선택한 LLM provider(Codex CLI 또는 Gemini API)로 오늘의 경제뉴스 퀴즈용 최종 뉴스 1개를 선정하는 독립 프로젝트입니다.
+네이버 신문보기에서 지정 신문사들의 1면 기사 제목과 본문을 수집하고, 환경변수로 선택한 LLM provider(Codex CLI 또는 Gemini API)로 오늘의 경제뉴스 퀴즈용 최종 뉴스 1개를 선정하는 독립 프로젝트입니다.
 
 ## 실행
 
@@ -58,6 +58,20 @@ python src/main.py --send-telegram --insert-news-quiz
 
 `--insert-news-quiz`를 켜면 최종 선정된 뉴스 1건의 제목, 링크, 키워드, 한줄설명, 퀴즈 JSON, 선정 사유를 `mq_news_quiz`에 1건 insert합니다.
 
+## 기사 본문 수집
+
+1면 기사 목록을 수집한 뒤 각 기사 페이지를 병렬로 요청해 본문(`<article id="dic_area">` 영역)을 함께 수집합니다. 수집한 본문은 기사당 `--news-body-char-limit` 글자까지 잘라 제목과 함께 LLM 프롬프트의 `body` 필드로 전달합니다.
+
+- 기본값은 기사당 900자이고, `--news-body-char-limit 0`을 주면 본문 수집을 건너뛰고 제목만 분석합니다.
+- 개별 기사 요청이 실패하면 해당 기사의 `body`만 빈 문자열이 되고 실행은 계속됩니다. 실패 건은 `article_body_fetch_failed` 로그로 남습니다.
+- 수집 결과는 콘솔에 `news_bodies_fetched: 성공건수/전체건수`로 출력됩니다.
+
+## 키워드 선정 규칙
+
+- 키워드는 기사 제목에 그대로 없어도 됩니다. 수집한 기사 본문에 등장하고 그 기사의 핵심 내용이면 후보로 허용합니다.
+- 제목과 본문 어디에도 없는 키워드는 후보 단계에서 제외합니다. 단, 본문 수집이 실패한 기사는 검증 근거가 없으므로 제목 기준으로만 판단합니다.
+- 최종 선정 단계에서는 가능한 1어절(공백 없는) 키워드를 우선합니다. 1어절 후보가 있으면 그 후보들만 최종 선정 대상이 되고, 없으면 어절 수가 가장 적은 후보들 중에서 선정합니다.
+
 테스트:
 
 ```powershell
@@ -85,6 +99,8 @@ python -m pytest
 --news-keyword-model  키워드 후보 추출과 최종 선정에 사용할 LLM 모델입니다. 실제 호출 모델로 우선 사용됩니다.
 --news-keyword-url    기본 신문보기 수집 대상 대신 단일 네이버 신문보기 URL을 수집합니다.
 --news-title-limit    LLM에 전달할 기사 제목 개수 상한입니다. 기본값: 30
+--news-body-char-limit
+                      기사당 수집해 LLM에 전달할 본문 글자 수 상한입니다. 0이면 본문 수집을 건너뜁니다. 기본값: 900
 --send-telegram       최종 선정된 오늘의 경제뉴스 퀴즈를 텔레그램으로 전송합니다.
 --telegram-test       TELEGRAM_CHAT_ID 대신 TELEGRAM_CHAT_TEST_ID로 전송합니다.
 --output-dir          LLM 임시 출력 파일 디렉토리입니다. 기본값: output

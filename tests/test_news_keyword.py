@@ -1,15 +1,35 @@
 import json
 import unittest
+from unittest.mock import patch
 
 from news_keyword import (
     NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT,
+    attach_naver_article_bodies,
     build_news_keyword_prompt,
     build_news_keyword_response_json_schema,
+    count_articles_with_body,
+    extract_naver_article_body,
     extract_naver_newspaper_front_page_articles,
     filter_news_keyword_candidates,
     has_complete_candidate_learning_content,
+    is_keyword_supported_by_article,
     parse_news_keyword_candidates,
 )
+
+
+ARTICLE_PAGE_HTML = """
+<html><body>
+  <div id="newsct_article" class="newsct_article _article_body">
+    <article id="dic_area" class="go_trans _article_content">
+      <script>var ad = 1;</script>
+      <strong>전기요금 인상</strong> 결정으로 발전단가 부담이 커졌다.
+      <div class="end_photo_org"><em>그래픽=기자</em></div>
+      한국전력은 &quot;원가 회수율&quot;을 근거로 제시했다.
+    </article>
+  </div>
+  <div id="comment_area">댓글 영역은 본문이 아닙니다.</div>
+</body></html>
+"""
 
 
 class NewsKeywordParsingTest(unittest.TestCase):
@@ -110,7 +130,7 @@ class NewsKeywordParsingTest(unittest.TestCase):
         )
         self.assertTrue(has_complete_candidate_learning_content(candidates[0]))
 
-    def test_filter_candidates_requires_source_url_keyword_length_and_title_support(self):
+    def test_filter_candidates_requires_source_url_and_keyword_length(self):
         articles = [
             {"title": "코스피 8000선 돌파", "url": "https://example.com/a"},
             {"title": "전기요금 인상", "url": "https://example.com/b"},
@@ -118,7 +138,6 @@ class NewsKeywordParsingTest(unittest.TestCase):
         candidates = [
             {"keyword": "코스피", "source_url": "https://example.com/a", "reason": "model"},
             {"keyword": "가", "source_url": "https://example.com/a", "reason": "too short"},
-            {"keyword": "반도체", "source_url": "https://example.com/b", "reason": "unsupported"},
             {"keyword": "ETF", "source_url": "https://example.com/missing", "reason": "missing"},
         ]
 
@@ -128,6 +147,99 @@ class NewsKeywordParsingTest(unittest.TestCase):
         self.assertEqual(filtered[0]["keyword"], "코스피")
         self.assertEqual(filtered[0]["source_title"], "코스피 8000선 돌파")
         self.assertEqual(filtered[0]["reason"], "model")
+
+    def test_filter_candidates_keeps_keyword_found_in_article_body(self):
+        articles = [
+            {
+                "title": "전기요금 인상",
+                "url": "https://example.com/b",
+                "body": "한국전력은 발전단가 상승을 이유로 요금 인상을 결정했다.",
+            }
+        ]
+        candidates = [
+            {"keyword": "발전단가", "source_url": "https://example.com/b", "reason": "본문 핵심"}
+        ]
+
+        filtered = filter_news_keyword_candidates(candidates, articles)
+
+        self.assertEqual([candidate["keyword"] for candidate in filtered], ["발전단가"])
+        self.assertEqual(filtered[0]["source_title"], "전기요금 인상")
+
+    def test_filter_candidates_drops_keyword_missing_from_title_and_body(self):
+        articles = [
+            {
+                "title": "전기요금 인상",
+                "url": "https://example.com/b",
+                "body": "한국전력은 발전단가 상승을 이유로 요금 인상을 결정했다.",
+            }
+        ]
+        candidates = [
+            {"keyword": "가상자산", "source_url": "https://example.com/b", "reason": "근거 없음"}
+        ]
+
+        self.assertEqual(filter_news_keyword_candidates(candidates, articles), [])
+
+    def test_filter_candidates_keeps_keyword_when_body_is_unavailable(self):
+        articles = [{"title": "전기요금 인상", "url": "https://example.com/b", "body": ""}]
+        candidates = [
+            {"keyword": "발전단가", "source_url": "https://example.com/b", "reason": "본문 수집 실패"}
+        ]
+
+        filtered = filter_news_keyword_candidates(candidates, articles)
+
+        self.assertEqual([candidate["keyword"] for candidate in filtered], ["발전단가"])
+
+    def test_is_keyword_supported_by_article_matches_title_or_body(self):
+        self.assertTrue(is_keyword_supported_by_article("전기요금", "전기요금 인상", ""))
+        self.assertTrue(is_keyword_supported_by_article("발전단가", "전기요금 인상", "발전단가 상승"))
+        self.assertFalse(is_keyword_supported_by_article("가상자산", "전기요금 인상", "발전단가 상승"))
+        self.assertFalse(is_keyword_supported_by_article("", "전기요금 인상", "발전단가 상승"))
+
+    def test_extract_naver_article_body_reads_article_content_only(self):
+        body = extract_naver_article_body(ARTICLE_PAGE_HTML)
+
+        self.assertIn("전기요금 인상", body)
+        self.assertIn("발전단가", body)
+        self.assertIn('"원가 회수율"', body)
+        self.assertNotIn("var ad", body)
+        self.assertNotIn("댓글 영역", body)
+        self.assertNotIn("<", body)
+
+    def test_extract_naver_article_body_applies_char_limit(self):
+        body = extract_naver_article_body(ARTICLE_PAGE_HTML, char_limit=20)
+
+        self.assertLessEqual(len(body), 20)
+        self.assertTrue(body)
+
+    def test_extract_naver_article_body_returns_empty_without_body_area(self):
+        self.assertEqual(extract_naver_article_body("<html><body>no body</body></html>"), "")
+
+    def test_attach_naver_article_bodies_fills_body_and_survives_failures(self):
+        articles = [
+            {"title": "전기요금 인상", "url": "https://example.com/ok"},
+            {"title": "코스피 8000선 돌파", "url": "https://example.com/fail"},
+        ]
+
+        def fake_fetch_html(url, timeout=10):
+            if url.endswith("/fail"):
+                raise RuntimeError("Failed to fetch news page")
+            return ARTICLE_PAGE_HTML
+
+        with patch("news_keyword.fetch_html", side_effect=fake_fetch_html):
+            attached = attach_naver_article_bodies(articles, char_limit=200)
+
+        self.assertIn("발전단가", attached[0]["body"])
+        self.assertEqual(attached[1]["body"], "")
+        self.assertEqual(count_articles_with_body(attached), 1)
+        self.assertNotIn("body", articles[0])
+
+    def test_attach_naver_article_bodies_skips_crawling_when_limit_is_zero(self):
+        articles = [{"title": "전기요금 인상", "url": "https://example.com/ok"}]
+
+        with patch("news_keyword.fetch_html", side_effect=AssertionError("must not fetch")):
+            attached = attach_naver_article_bodies(articles, char_limit=0)
+
+        self.assertEqual(attached, articles)
 
     def test_filter_candidates_does_not_add_keyword_description_and_quiz(self):
         articles = [{"title": "ETF 신규 상장", "url": "https://example.com/a"}]
@@ -187,6 +299,8 @@ class NewsKeywordParsingTest(unittest.TestCase):
         self.assertNotIn('"option_b"', prompt)
         self.assertIn("코스피 8000선 돌파", prompt)
         self.assertIn("Keep Korean text as normal readable Korean", prompt)
+        self.assertIn("appear in the selected article's title or body text", prompt)
+        self.assertIn('"body" field that holds the beginning of the crawled article text', prompt)
         self.assertNotIn("Unicode escape sequences", prompt)
         self.assertNotIn("\\ucf54\\uc2a4\\ud53c", prompt)
 

@@ -1,9 +1,11 @@
 import html
+import http.client
 import json
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 DEFAULT_NEWSPAPER_SOURCES = (
@@ -15,6 +17,10 @@ DEFAULT_NEWSPAPER_SOURCES = (
 DEFAULT_NEWS_TITLE_LIMIT = 30
 NEWS_KEYWORD_COUNT = 3
 NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT = 5
+DEFAULT_ARTICLE_BODY_CHAR_LIMIT = 900
+DEFAULT_ARTICLE_BODY_WORKERS = 8
+ARTICLE_BODY_ELEMENT_IDS = ("dic_area", "newsct_article", "articeBody", "articleBodyContents")
+ARTICLE_BODY_FETCH_ERRORS = (RuntimeError, OSError, http.client.HTTPException)
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -116,6 +122,129 @@ def fetch_naver_newspaper_front_page_articles(sources=DEFAULT_NEWSPAPER_SOURCES,
         raise ValueError(f"No Naver newspaper front-page articles found from: {source_urls}")
     return articles
 
+
+def extract_html_element_by_id(html_text, element_id):
+    """HTML에서 지정한 id를 가진 article/div/section 요소의 내부 HTML을 잘라냅니다.
+
+    입력: html_text는 기사 페이지 HTML 문자열, element_id는 찾을 요소의 id 값입니다.
+    출력: 여는 태그와 짝이 맞는 닫는 태그 사이의 HTML 조각을 반환하고, 없으면 빈 문자열을 반환합니다.
+    """
+    open_tag_match = re.search(
+        r'<(?P<tag>article|div|section)\b[^>]*id="%s"[^>]*>' % re.escape(element_id),
+        html_text,
+    )
+    if not open_tag_match:
+        return ""
+
+    tag = open_tag_match.group("tag")
+    start = open_tag_match.end()
+    depth = 1
+    for tag_match in re.finditer(r"</?%s\b" % tag, html_text[start:]):
+        if tag_match.group(0).startswith("</"):
+            depth -= 1
+            if depth == 0:
+                return html_text[start : start + tag_match.start()]
+        else:
+            depth += 1
+    return html_text[start:]
+
+
+def normalize_article_body(value, char_limit=DEFAULT_ARTICLE_BODY_CHAR_LIMIT):
+    """기사 본문 HTML 조각을 한 줄 평문 텍스트로 정리하고 길이를 제한합니다.
+
+    입력: value는 본문 HTML 조각, char_limit은 프롬프트에 담을 최대 글자 수입니다.
+    출력: 태그와 스크립트를 제거하고 공백을 정리한 본문 문자열을 반환합니다.
+    """
+    fragment = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", " ", str(value))
+    fragment = re.sub(r"<!--[\s\S]*?-->", " ", fragment)
+    fragment = re.sub(r"<[^>]+>", " ", fragment)
+    body = html.unescape(fragment)
+    body = re.sub(r"\s+", " ", body).strip()
+    if char_limit and len(body) > char_limit:
+        truncated = body[:char_limit]
+        last_space = truncated.rfind(" ")
+        if last_space > char_limit // 2:
+            truncated = truncated[:last_space]
+        body = truncated.strip()
+    return body
+
+
+def extract_naver_article_body(html_text, char_limit=DEFAULT_ARTICLE_BODY_CHAR_LIMIT):
+    """네이버 기사 페이지 HTML에서 본문 텍스트를 추출합니다.
+
+    입력: html_text는 기사 페이지 HTML 문자열, char_limit은 최대 본문 글자 수입니다.
+    출력: 정리된 본문 텍스트를 반환하고, 본문 영역을 찾지 못하면 빈 문자열을 반환합니다.
+    """
+    for element_id in ARTICLE_BODY_ELEMENT_IDS:
+        fragment = extract_html_element_by_id(html_text, element_id)
+        if not fragment:
+            continue
+        body = normalize_article_body(fragment, char_limit=char_limit)
+        if body:
+            return body
+    return ""
+
+
+def fetch_naver_article_body(url, timeout=10, char_limit=DEFAULT_ARTICLE_BODY_CHAR_LIMIT):
+    """기사 URL을 요청해 본문 텍스트를 가져옵니다.
+
+    입력: url은 기사 URL, timeout은 초 단위 요청 제한 시간, char_limit은 최대 본문 글자 수입니다.
+    출력: 정리된 본문 텍스트를 반환합니다.
+    """
+    html_text = fetch_html(url, timeout=timeout)
+    return extract_naver_article_body(html_text, char_limit=char_limit)
+
+
+def attach_naver_article_bodies(
+    articles,
+    char_limit=DEFAULT_ARTICLE_BODY_CHAR_LIMIT,
+    timeout=10,
+    max_workers=DEFAULT_ARTICLE_BODY_WORKERS,
+    logger=None,
+):
+    """기사 목록의 각 URL 본문을 병렬로 수집해 body 값을 채웁니다.
+
+    입력: articles는 title/url을 가진 기사 목록, char_limit은 최대 본문 글자 수, timeout은 요청 제한 시간, max_workers는 동시 요청 수, logger는 선택적 로거입니다.
+    출력: 각 기사에 body 값을 추가한 새 기사 목록을 반환합니다.
+    비고: 개별 기사 요청이 실패해도 전체 실행을 중단하지 않고 해당 기사의 body만 빈 문자열로 둡니다.
+    """
+    article_list = [dict(article) for article in articles]
+    if not article_list or char_limit < 1:
+        return article_list
+
+    workers = max(1, min(max_workers, len(article_list)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(
+                fetch_naver_article_body,
+                article["url"],
+                timeout,
+                char_limit,
+            ): index
+            for index, article in enumerate(article_list)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                article_list[index]["body"] = future.result()
+            except ARTICLE_BODY_FETCH_ERRORS as exc:
+                article_list[index]["body"] = ""
+                if logger:
+                    logger.warning(
+                        "article_body_fetch_failed url=%s error=%s",
+                        article_list[index]["url"],
+                        exc,
+                    )
+    return article_list
+
+
+def count_articles_with_body(articles):
+    """본문 수집에 성공한 기사 개수를 셉니다.
+
+    입력: articles는 body 값을 가질 수 있는 기사 목록입니다.
+    출력: 본문 텍스트가 채워진 기사 개수를 반환합니다.
+    """
+    return sum(1 for article in articles if (article.get("body") or "").strip())
 
 
 def build_news_keyword_response_json_schema(
@@ -263,10 +392,12 @@ def build_news_keyword_prompt(
 - explanation must be one Korean sentence in friendly teacher-like 해요체 explaining why the answer is correct and why the other option is less appropriate.
 """
 
-    return f"""You extract image-generation source keywords from Korean economy newspaper front-page article titles.
+    return f"""You extract image-generation source keywords from Korean economy newspaper front-page articles.
 
 Select exactly {keyword_count} main keyword candidates from the article list.
 The article list is JSON and Korean text is provided as-is.
+Each article object has a "title" field and a "body" field that holds the beginning of the crawled article text.
+The body may be truncated, and it is an empty string when the crawl failed. Read both fields to judge what the article is really about.
 
 Rules:
 - Return only a JSON array of exactly {keyword_count} objects.
@@ -274,10 +405,11 @@ Rules:
 - All keyword values must be unique.
 - source_url must be copied exactly from the input article URL that most directly supports the keyword.
 - reason must be one concrete Korean sentence explaining the economic event, metric, company action, or market movement behind the keyword.
-- reason must use only facts visible in the input title and must not add company names, numbers, causes, or claims that are not present there.
+- reason must stay grounded in the provided title and body, and must not add company names, numbers, causes, or claims that they do not support.
 - Do not use meta phrases in reason such as "headline", "title", "article", or "news".
 - A good reason names the actual substance, such as price movement, fund sales, product launch, policy change, supply contract, labor dispute, or earnings impact.
-- Each keyword must be copied from the selected title or be a standard economic term directly implied by it, such as "KOSPI" for an index-level title.
+- Each keyword must appear in the selected article's title or body text, and it must be one of the core topics of that article.
+- A keyword that is absent from the title is allowed when the body covers it as core content. Never use a term that appears only as minor background detail, and never use a term that is in neither the title nor the body.
 - Do not select personal names, politician names, or executive names as keywords. Choose the economic term, event, product, policy, or market indicator instead.
 - Do not output typo-like variants. If a title implies "KOSPI", never write a misspelled variant.
 - Exclude security, diplomacy, and politics topics such as nuclear submarines, uranium, Iran, Trump, presidential remarks, and executive apologies unless the keyword itself is a direct economic market term.
@@ -331,10 +463,11 @@ def filter_news_keyword_candidates(
     keyword_count=NEWS_KEYWORD_COUNT,
     require_learning_content=False,
 ):
-    """후보가 실제 기사 URL과 제목에 의해 뒷받침되는지 검증하고 필터를 적용합니다.
+    """후보가 실제 수집된 기사 URL과 기사 텍스트로 뒷받침되는지 검증하고 필터를 적용합니다.
 
-    입력: candidates는 LLM 후보 목록, articles는 원본 기사 목록, keyword_count는 최대 후보 개수입니다.
+    입력: candidates는 LLM 후보 목록, articles는 title/body를 가진 원본 기사 목록, keyword_count는 최대 후보 개수입니다.
     출력: source_title과 정제된 reason을 포함한 후보 딕셔너리 목록을 반환합니다.
+    비고: 키워드는 제목에 없어도 수집한 본문에 등장하면 허용합니다.
     """
     articles_by_url = {article["url"]: article for article in articles}
     filtered = []
@@ -349,7 +482,7 @@ def filter_news_keyword_candidates(
             continue
         if not is_allowed_news_keyword(keyword):
             continue
-        if not is_keyword_supported_by_title(keyword, article["title"]):
+        if not is_keyword_supported_by_article(keyword, article["title"], article.get("body", "")):
             continue
         if require_learning_content and not has_complete_candidate_learning_content(candidate):
             continue
@@ -382,18 +515,23 @@ def is_allowed_news_keyword(keyword):
     return True
 
 
-def is_keyword_supported_by_title(keyword, title):
-    """키워드가 기사 제목에 포함되어 있는지 확인합니다.
+def is_keyword_supported_by_article(keyword, title, body=""):
+    """키워드가 기사 제목 또는 수집한 본문에 등장하는지 확인합니다.
 
-    입력: keyword는 후보 키워드, title은 원본 기사 제목입니다.
-    출력: 제목으로 뒷받침되면 True, 그렇지 않으면 False를 반환합니다.
+    입력: keyword는 후보 키워드, title은 기사 제목, body는 수집한 기사 본문 텍스트입니다.
+    출력: 제목이나 본문에 등장하면 True, 둘 다에 없으면 False를 반환합니다.
+    비고: 본문 수집에 실패해 body가 비어 있으면 검증 근거가 없으므로 제목 검사만 적용하고 통과시킵니다.
     """
-    normalized_title = normalize_keyword_match_text(title)
-    if not normalized_title:
-        return False
-
     normalized_keyword = normalize_keyword_match_text(keyword)
-    return bool(normalized_keyword and normalized_keyword in normalized_title)
+    if not normalized_keyword:
+        return False
+    if normalized_keyword in normalize_keyword_match_text(title):
+        return True
+
+    normalized_body = normalize_keyword_match_text(body)
+    if not normalized_body:
+        return True
+    return normalized_keyword in normalized_body
 
 
 def normalize_keyword_match_text(value):

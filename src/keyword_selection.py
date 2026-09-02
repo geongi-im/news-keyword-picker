@@ -130,6 +130,46 @@ def filter_non_duplicate_news_keyword_candidates(candidates):
     return [candidate for candidate in candidates if not candidate.get("exists_in_db")]
 
 
+def count_keyword_words(keyword):
+    """키워드의 어절 수를 셉니다.
+
+    입력: keyword는 어절 수를 셀 키워드 문자열입니다.
+    출력: 공백으로 구분된 어절 개수를 반환하고, 빈 값이면 0을 반환합니다.
+    """
+    return len(str(keyword or "").split())
+
+
+def is_single_word_keyword(keyword):
+    """키워드가 공백 없는 1어절인지 확인합니다.
+
+    입력: keyword는 검사할 키워드 문자열입니다.
+    출력: 1어절이면 True, 빈 값이거나 2어절 이상이면 False를 반환합니다.
+    """
+    return count_keyword_words(keyword) == 1
+
+
+def prefer_single_word_keyword_candidates(candidates):
+    """최종 선정 대상을 가능한 1어절 키워드 후보로 좁힙니다.
+
+    입력: candidates는 중복 검사를 통과한 후보 목록입니다.
+    출력: 1어절 후보가 있으면 그 후보만, 없으면 어절 수가 가장 적은 후보만 남긴 목록을 반환합니다.
+    """
+    scored = [
+        (candidate, count_keyword_words(candidate.get("keyword", "")))
+        for candidate in candidates
+    ]
+    valid = [(candidate, words) for candidate, words in scored if words > 0]
+    if not valid:
+        return list(candidates)
+
+    single_word = [candidate for candidate, words in valid if words == 1]
+    if single_word:
+        return single_word
+
+    fewest_words = min(words for _, words in valid)
+    return [candidate for candidate, words in valid if words == fewest_words]
+
+
 def build_viral_keyword_selection_prompt(candidates):
     """중복이 아닌 후보 중 최종 키워드 1개를 고르게 하는 LLM 프롬프트를 만듭니다.
 
@@ -153,6 +193,7 @@ Judge viral potential by timeliness, public impact, market sensitivity, consumer
 
 Rules:
 - Select only from the input candidates.
+- Prefer a keyword that is a single word with no spaces, and pick a multi-word keyword only when no single-word candidate is present.
 - Copy keyword and source_url exactly from the selected input candidate.
 - Return only one JSON object with "keyword", "source_url", and "reason" string fields.
 - The reason must be one concrete Korean sentence.
@@ -169,17 +210,19 @@ def select_viral_news_keyword_candidate(candidates, output_dir, llm_client, mode
 
     입력: candidates는 후보 목록, output_dir은 LLM 임시 출력 위치, llm_client는 LLM 호출 구현체, model은 선택 모델명입니다.
     출력: selection_reason을 포함한 최종 후보 딕셔너리를 반환합니다.
+    비고: 1어절 키워드 후보가 있으면 그 후보만 선정 대상으로 사용합니다.
     """
     if not candidates:
         raise RuntimeError("No non-duplicate news keyword candidates are available.")
-    if len(candidates) == 1:
-        selected = dict(candidates[0])
+    selection_pool = prefer_single_word_keyword_candidates(candidates)
+    if len(selection_pool) == 1:
+        selected = dict(selection_pool[0])
         selected["selection_reason"] = (
             selected.get("reason") or "Only one non-duplicate candidate remained."
         )
         return selected
 
-    prompt = build_viral_keyword_selection_prompt(candidates)
+    prompt = build_viral_keyword_selection_prompt(selection_pool)
     output = llm_client.generate_text(
         prompt=prompt,
         output_dir=output_dir,
@@ -188,7 +231,7 @@ def select_viral_news_keyword_candidate(candidates, output_dir, llm_client, mode
         response_json_schema=VIRAL_SELECTION_RESPONSE_JSON_SCHEMA,
         response_mime_type="application/json",
     )
-    selected = parse_selected_viral_keyword_candidate(output, candidates)
+    selected = parse_selected_viral_keyword_candidate(output, selection_pool)
     if selected is None:
         raise RuntimeError(f"Failed to select a final news keyword. output={output!r}")
     return selected
@@ -374,7 +417,7 @@ def run_news_keyword_selection_process(
     """후보 중 최종 키워드 1개를 선택하고, 옵션에 따라 MySQL insert를 실행합니다.
 
     입력: candidates는 키워드 후보 목록, args는 CLI 옵션, root_dir은 프로젝트 루트, output_dir은 LLM 출력 위치, llm_client는 LLM 호출 구현체입니다.
-    출력: 중복 검사 결과, 선택 가능 후보, 최종 후보, target_date, insert 결과를 담은 딕셔너리를 반환합니다.
+    출력: 중복 검사 결과, 선택 가능 후보, 1어절 우선 선정 대상 후보, 최종 후보, target_date, insert 결과를 담은 딕셔너리를 반환합니다.
     """
     storage_config = resolve_news_keyword_storage_config()
     db_config = None
@@ -393,6 +436,7 @@ def run_news_keyword_selection_process(
         if insert_publish_content
         else checked_candidates
     )
+    selection_pool = prefer_single_word_keyword_candidates(eligible_candidates)
     selected_candidate = select_viral_news_keyword_candidate(
         eligible_candidates,
         output_dir=output_dir,
@@ -424,6 +468,7 @@ def run_news_keyword_selection_process(
     return {
         "checked_candidates": checked_candidates,
         "eligible_candidates": eligible_candidates,
+        "selection_pool": selection_pool,
         "selected_candidate": selected_candidate,
         "target_date": storage_config.target_date,
         "insert_result": insert_result,
