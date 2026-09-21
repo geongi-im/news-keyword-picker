@@ -1,10 +1,13 @@
 import json
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 from news_keyword import (
     NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT,
     attach_naver_article_bodies,
+    fetch_html,
+    fetch_naver_newspaper_front_page_articles,
     build_news_keyword_prompt,
     build_news_keyword_response_json_schema,
     count_articles_with_body,
@@ -30,6 +33,121 @@ ARTICLE_PAGE_HTML = """
   <div id="comment_area">댓글 영역은 본문이 아닙니다.</div>
 </body></html>
 """
+
+
+FRONT_PAGE_HTML = """
+<div class="newspaper_brick_item _start_page">
+  <a href="https://n.news.naver.com/article/newspaper/014/0000000001">
+    <strong>전기요금 인상</strong>
+  </a>
+</div>
+"""
+
+
+class NewsPageFetchTest(unittest.TestCase):
+    def test_fetch_html_retries_transient_network_error(self):
+        attempts = []
+
+        def fake_urlopen(request, timeout=None):
+            attempts.append(timeout)
+            if len(attempts) < 3:
+                raise urllib.error.URLError(TimeoutError("handshake operation timed out"))
+            return FakeResponse(FRONT_PAGE_HTML)
+
+        with (
+            patch("news_keyword.urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("news_keyword.time.sleep"),
+        ):
+            html_text = fetch_html("https://example.com/page", retry_delay=0)
+
+        self.assertEqual(len(attempts), 3)
+        self.assertIn("전기요금 인상", html_text)
+
+    def test_fetch_html_raises_after_retry_limit(self):
+        def fake_urlopen(request, timeout=None):
+            raise urllib.error.URLError(TimeoutError("handshake operation timed out"))
+
+        with (
+            patch("news_keyword.urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("news_keyword.time.sleep"),
+        ):
+            with self.assertRaises(RuntimeError) as error:
+                fetch_html("https://example.com/page", retry_count=1, retry_delay=0)
+
+        self.assertIn("Failed to fetch news page", str(error.exception))
+
+    def test_fetch_html_does_not_retry_not_found_response(self):
+        attempts = []
+        not_found_error = urllib.error.HTTPError(
+            "https://example.com/page", 404, "Not Found", {}, None
+        )
+        self.addCleanup(not_found_error.close)
+
+        def fake_urlopen(request, timeout=None):
+            attempts.append(timeout)
+            raise not_found_error
+
+        with (
+            patch("news_keyword.urllib.request.urlopen", side_effect=fake_urlopen),
+            patch("news_keyword.time.sleep"),
+        ):
+            with self.assertRaises(RuntimeError):
+                fetch_html("https://example.com/page", retry_delay=0)
+
+        self.assertEqual(len(attempts), 1)
+
+    def test_front_page_fetch_skips_failed_source(self):
+        sources = (
+            {"name": "실패신문", "url": "https://example.com/fail"},
+            {"name": "정상신문", "url": "https://example.com/ok"},
+        )
+
+        def fake_fetch_html(url, timeout=None, logger=None):
+            if url.endswith("/fail"):
+                raise RuntimeError("Failed to fetch news page")
+            return FRONT_PAGE_HTML
+
+        with patch("news_keyword.fetch_html", side_effect=fake_fetch_html):
+            articles = fetch_naver_newspaper_front_page_articles(sources=sources)
+
+        self.assertEqual(len(articles), 1)
+        self.assertEqual(articles[0]["source_name"], "정상신문")
+
+    def test_front_page_fetch_raises_when_every_source_fails(self):
+        sources = ({"name": "실패신문", "url": "https://example.com/fail"},)
+
+        def fake_fetch_html(url, timeout=None, logger=None):
+            raise RuntimeError("Failed to fetch news page")
+
+        with patch("news_keyword.fetch_html", side_effect=fake_fetch_html):
+            with self.assertRaises(ValueError) as error:
+                fetch_naver_newspaper_front_page_articles(sources=sources)
+
+        self.assertIn("fetch failures", str(error.exception))
+
+
+class FakeResponse:
+    """urlopen 응답을 대신하는 테스트용 컨텍스트 매니저입니다."""
+
+    def __init__(self, body):
+        self._body = body
+        self.headers = FakeHeaders()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def read(self):
+        return self._body.encode("utf-8")
+
+
+class FakeHeaders:
+    """응답 헤더의 charset 조회만 흉내내는 테스트용 객체입니다."""
+
+    def get_content_charset(self):
+        return "utf-8"
 
 
 class NewsKeywordParsingTest(unittest.TestCase):

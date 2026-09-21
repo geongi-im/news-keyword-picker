@@ -187,6 +187,7 @@ def suggest_news_keyword_candidates(args, output_dir, llm_client=None, logger=No
     articles = fetch_naver_newspaper_front_page_articles(
         sources=sources,
         limit=args.news_title_limit,
+        logger=logger,
     )
     print(f"news_titles_fetched: {len(articles)}")
     if logger:

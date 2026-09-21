@@ -2,6 +2,7 @@ import html
 import http.client
 import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,6 +22,10 @@ DEFAULT_ARTICLE_BODY_CHAR_LIMIT = 900
 DEFAULT_ARTICLE_BODY_WORKERS = 8
 ARTICLE_BODY_ELEMENT_IDS = ("dic_area", "newsct_article", "articeBody", "articleBodyContents")
 ARTICLE_BODY_FETCH_ERRORS = (RuntimeError, OSError, http.client.HTTPException)
+DEFAULT_FETCH_TIMEOUT = 15
+DEFAULT_FETCH_RETRY_COUNT = 2
+DEFAULT_FETCH_RETRY_DELAY_SECONDS = 2
+NETWORK_FETCH_ERRORS = (OSError, http.client.HTTPException)
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -78,30 +83,81 @@ def extract_naver_newspaper_front_page_articles(html_text, base_url):
     return articles
 
 
-def fetch_html(url, timeout=10):
+def is_retryable_fetch_error(exc):
+    """요청 실패를 재시도할 수 있는 일시적 오류인지 판단합니다.
+
+    입력: exc는 요청 중 발생한 예외입니다.
+    출력: 타임아웃/연결 오류/서버 오류면 True, 404 같은 응답 오류면 False를 반환합니다.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code >= 500 or exc.code == 429
+    return True
+
+
+def fetch_html(
+    url,
+    timeout=DEFAULT_FETCH_TIMEOUT,
+    retry_count=DEFAULT_FETCH_RETRY_COUNT,
+    retry_delay=DEFAULT_FETCH_RETRY_DELAY_SECONDS,
+    logger=None,
+):
     """지정한 URL의 HTML을 User-Agent 헤더와 함께 가져옵니다.
 
-    입력: url은 요청 URL, timeout은 초 단위 네트워크 제한 시간입니다.
-    출력: 디코딩된 HTML 문자열을 반환하고, 요청 실패 시 RuntimeError를 발생시킵니다.
+    입력: url은 요청 URL, timeout은 초 단위 네트워크 제한 시간, retry_count는 추가 재시도 횟수, retry_delay는 재시도 간 대기 초, logger는 선택적 로거입니다.
+    출력: 디코딩된 HTML 문자열을 반환하고, 모든 시도가 실패하면 RuntimeError를 발생시킵니다.
+    비고: SSL 핸드셰이크 타임아웃 같은 일시적 네트워크 오류는 대기 시간을 늘려가며 재시도합니다.
     """
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            charset = response.headers.get_content_charset() or "utf-8"
-            return response.read().decode(charset, errors="replace")
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Failed to fetch news page: {url}: {exc}") from exc
+    attempt_limit = max(1, retry_count + 1)
+    last_error = None
+    for attempt in range(1, attempt_limit + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                charset = response.headers.get_content_charset() or "utf-8"
+                return response.read().decode(charset, errors="replace")
+        except NETWORK_FETCH_ERRORS as exc:
+            last_error = exc
+            if logger:
+                logger.warning(
+                    "news_page_fetch_failed url=%s attempt=%s/%s error=%s",
+                    url,
+                    attempt,
+                    attempt_limit,
+                    exc,
+                )
+            if attempt >= attempt_limit or not is_retryable_fetch_error(exc):
+                break
+            time.sleep(retry_delay * attempt)
+    raise RuntimeError(f"Failed to fetch news page: {url}: {last_error}") from last_error
 
 
-def fetch_naver_newspaper_front_page_articles(sources=DEFAULT_NEWSPAPER_SOURCES, limit=DEFAULT_NEWS_TITLE_LIMIT, timeout=10):
+def fetch_naver_newspaper_front_page_articles(
+    sources=DEFAULT_NEWSPAPER_SOURCES,
+    limit=DEFAULT_NEWS_TITLE_LIMIT,
+    timeout=DEFAULT_FETCH_TIMEOUT,
+    logger=None,
+):
     """여러 네이버 신문보기 출처에서 1면 기사 목록을 수집합니다.
 
-    입력: sources는 name/url 딕셔너리 목록, limit은 전체 최대 기사 수, timeout은 요청 제한 시간입니다.
+    입력: sources는 name/url 딕셔너리 목록, limit은 전체 최대 기사 수, timeout은 요청 제한 시간, logger는 선택적 로거입니다.
     출력: source_name, title, url을 가진 기사 딕셔너리 목록을 반환합니다.
+    비고: 일부 출처 요청이 실패해도 나머지 출처로 계속 진행하고, 모든 출처가 실패했을 때만 ValueError를 발생시킵니다.
     """
     articles = []
+    failures = []
     for source in sources:
-        html_text = fetch_html(source["url"], timeout=timeout)
+        try:
+            html_text = fetch_html(source["url"], timeout=timeout, logger=logger)
+        except RuntimeError as exc:
+            failures.append(f"{source['name']}: {exc}")
+            if logger:
+                logger.warning(
+                    "news_source_fetch_skipped source=%s url=%s error=%s",
+                    source["name"],
+                    source["url"],
+                    exc,
+                )
+            continue
         source_articles = extract_naver_newspaper_front_page_articles(
             html_text,
             base_url=source["url"],
@@ -119,7 +175,10 @@ def fetch_naver_newspaper_front_page_articles(sources=DEFAULT_NEWSPAPER_SOURCES,
         articles = articles[:limit]
     if not articles:
         source_urls = ", ".join(source["url"] for source in sources)
-        raise ValueError(f"No Naver newspaper front-page articles found from: {source_urls}")
+        message = f"No Naver newspaper front-page articles found from: {source_urls}"
+        if failures:
+            message = f"{message} (fetch failures: {' | '.join(failures)})"
+        raise ValueError(message)
     return articles
 
 
@@ -185,7 +244,7 @@ def extract_naver_article_body(html_text, char_limit=DEFAULT_ARTICLE_BODY_CHAR_L
     return ""
 
 
-def fetch_naver_article_body(url, timeout=10, char_limit=DEFAULT_ARTICLE_BODY_CHAR_LIMIT):
+def fetch_naver_article_body(url, timeout=DEFAULT_FETCH_TIMEOUT, char_limit=DEFAULT_ARTICLE_BODY_CHAR_LIMIT):
     """기사 URL을 요청해 본문 텍스트를 가져옵니다.
 
     입력: url은 기사 URL, timeout은 초 단위 요청 제한 시간, char_limit은 최대 본문 글자 수입니다.
@@ -198,7 +257,7 @@ def fetch_naver_article_body(url, timeout=10, char_limit=DEFAULT_ARTICLE_BODY_CH
 def attach_naver_article_bodies(
     articles,
     char_limit=DEFAULT_ARTICLE_BODY_CHAR_LIMIT,
-    timeout=10,
+    timeout=DEFAULT_FETCH_TIMEOUT,
     max_workers=DEFAULT_ARTICLE_BODY_WORKERS,
     logger=None,
 ):
