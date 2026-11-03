@@ -191,3 +191,23 @@ INSERT INTO n8n_publish_content(category, keyword, target_date, `comment`) VALUE
 최종 선정 키워드 메시지에는 후보 생성 단계에서 LLM이 생성한 해요체 키워드 한줄설명, A/B 미니 퀴즈 정답, 해설이 포함됩니다.
 
 새 퀴즈 테이블 insert는 `mq_quiz_content`에 question, option_a, option_b, answer, explanation을 JSON 문자열로 저장합니다. 한글은 `ensure_ascii=False`로 직렬화해 읽을 수 있는 원문 그대로 저장합니다.
+
+
+## 스크립트 생성
+
+키워드 행(`n8n_publish_content`)에 대해 SNS 스크립트를 만들어 `content` 컬럼에 저장합니다. 이미지 생성과 `image_paths`는 다루지 않습니다(이미지는 cartoon-image-generator 프로젝트 담당).
+
+```powershell
+python src/script_main.py --template explain_child
+python src/script_main.py --template news_3s_quiz --date 2026-11-04
+python src/script_main.py --template 3s_quiz --keyword 금리
+```
+
+- `--template`: `explain_child`(자녀에게설명하기), `3s_quiz`(3초퀴즈), `news_explain_child`, `news_3s_quiz`. 프롬프트는 `prompt/SCRIPT_*.md`입니다.
+- `--date`: 대상 행의 `target_date`(YYYY-MM-DD). 기본값은 오늘입니다.
+- `--keyword`: 키워드를 직접 지정합니다. 해당 날짜/카테고리 행이 없으면 새로 insert합니다.
+- `--model`: 모델 override입니다. 기본값은 `LLM_MODEL`입니다.
+- 스크립트 생성은 `LLM_PROVIDER`와 무관하게 Gemini API로 고정이며 `GEMINI_API_KEY`, `LLM_MODEL`, `MYSQL_*`가 필요합니다. 텔레그램 환경변수는 필요 없습니다.
+- `news_*` 템플릿은 행의 `comment`에서 뉴스 URL을 꺼내 `mq_news_quiz`를 조회하고, 기사 제목/키워드 설명/선별 이유를 컨텍스트로 사용합니다.
+- 생성 결과가 500자 이상이면 DB에 저장하지 않고 실패합니다.
+- 대상 행의 `content`가 이미 채워져 있으면 생성하지 않고 건너뜁니다.
