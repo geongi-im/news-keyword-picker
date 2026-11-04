@@ -7,6 +7,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pymysql import MySQLError
 
+from db_connector import mysql_connect_kwargs
+from gemini_client import GEMINI_API_KEY_ENV, GeminiLLMClient
 from llm_provider import (
     DEFAULT_REASONING_EFFORT_ATTEMPTS,
     create_llm_client,
@@ -26,6 +28,7 @@ from news_keyword import (
     filter_news_keyword_candidates,
     parse_news_keyword_candidates,
 )
+from script_generation import resolve_target_date, run_script_generation, template_keys
 from utils.common_util import validate_required_environment
 from utils.logger_util import LoggerUtil
 from utils.telegram_util import TelegramUtil
@@ -38,6 +41,13 @@ REQUIRED_ENV_NAMES = [
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_CHAT_ID",
 ]
+
+SCRIPT_REQUIRED_ENV_NAMES = [
+    "LLM_MODEL",
+    GEMINI_API_KEY_ENV,
+]
+
+SCRIPT_RESPONSE_MIME_TYPE = "text/plain"
 
 NEWS_MIN_ARTICLE_COUNT_ENV = "NEWS_MIN_ARTICLE_COUNT"
 
@@ -112,6 +122,37 @@ def parse_args(argv):
         action="store_true",
         help="Insert the final selected news quiz into mq_news_quiz.",
     )
+    parser.add_argument(
+        "--generate-script",
+        action="append",
+        choices=template_keys(),
+        metavar="TEMPLATE",
+        help=(
+            "Generate a script with this template and save it to n8n_publish_content.content. "
+            "Repeat the option to run several templates. Choices: "
+            + ", ".join(template_keys())
+        ),
+    )
+    parser.add_argument(
+        "--script-date",
+        help=(
+            "Target date of the keyword row for --generate-script in YYYY-MM-DD format. "
+            "Defaults to the date used by this run's keyword selection, or today."
+        ),
+    )
+    parser.add_argument(
+        "--script-keyword",
+        help="Keyword to use directly for --generate-script. The row is inserted if it does not exist.",
+    )
+    parser.add_argument(
+        "--script-model",
+        help="Gemini model override for --generate-script. Defaults to the LLM_MODEL environment variable.",
+    )
+    parser.add_argument(
+        "--skip-keyword-selection",
+        action="store_true",
+        help="Skip crawling and keyword selection and only run --generate-script.",
+    )
     return parser.parse_args(argv)
 
 
@@ -124,6 +165,8 @@ def validate_args(args):
         raise ValueError("--news-title-limit must be greater than 0.")
     if args.news_body_char_limit < 0:
         raise ValueError("--news-body-char-limit must be 0 or greater.")
+    if getattr(args, "skip_keyword_selection", False) and not getattr(args, "generate_script", None):
+        raise ValueError("--skip-keyword-selection requires --generate-script.")
 
 
 def resolve_news_keyword_candidate_count(args):
@@ -534,8 +577,129 @@ def format_selected_news_keyword_message(selected_candidate):
     return "\n\n".join(sections)
 
 
+def create_script_llm_client(env=None):
+    """설명: 스크립트 생성용 Gemini 클라이언트를 만듭니다. 응답은 JSON이 아니라 일반 텍스트입니다.
+    입력: env는 환경변수 매핑이며 생략 시 os.environ을 사용합니다.
+    출력: text/plain 응답을 요청하는 GeminiLLMClient를 반환합니다.
+    """
+    env = env if env is not None else os.environ
+    return GeminiLLMClient(
+        api_key=env.get(GEMINI_API_KEY_ENV),
+        default_model=env.get("LLM_MODEL") or None,
+        response_mime_type=SCRIPT_RESPONSE_MIME_TYPE,
+    )
+
+
+def resolve_required_env_names(args):
+    """설명: 실행할 단계에 필요한 환경변수 이름을 중복 없이 모읍니다.
+    입력: args는 skip_keyword_selection, generate_script 옵션을 포함한 CLI 옵션 객체입니다.
+    출력: 필수 환경변수 이름 리스트를 반환합니다.
+    """
+    names = []
+    if not args.skip_keyword_selection:
+        names.extend(REQUIRED_ENV_NAMES)
+    if args.generate_script:
+        names.extend(SCRIPT_REQUIRED_ENV_NAMES)
+    return list(dict.fromkeys(names))
+
+
+def run_keyword_selection(args, root_dir, logger):
+    """설명: 기사 수집, 키워드 후보 추출, 최종 선정, 선택적 DB insert와 텔레그램 전송을 수행합니다.
+    입력: args는 CLI 옵션, root_dir은 프로젝트 루트 Path, logger는 로거입니다.
+    출력: run_news_keyword_selection_process가 반환한 선정 결과 딕셔너리를 반환합니다.
+    """
+    output_dir = resolve_output_dir(root_dir, args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("output_dir_ready path=%s", output_dir)
+    llm_client = create_llm_client()
+    logger.info(
+        "llm_client_created provider=%s default_model=%s",
+        getattr(llm_client, "provider", ""),
+        getattr(llm_client, "default_model", ""),
+    )
+    candidates = suggest_news_keyword_candidates(
+        args,
+        output_dir,
+        llm_client,
+        logger=logger,
+    )
+    print_news_keyword_candidates(candidates)
+    selection_result = run_news_keyword_selection_process(
+        candidates=candidates,
+        args=args,
+        root_dir=root_dir,
+        output_dir=output_dir,
+        llm_client=llm_client,
+        insert_publish_content=args.insert_publish_content,
+        insert_news_quiz=args.insert_news_quiz,
+    )
+    logger.info(
+        "selection_completed selected_keyword=%s target_date=%s insert_count=%s news_quiz_inserted=%s",
+        selection_result["selected_candidate"].get("keyword", ""),
+        selection_result["target_date"],
+        len(selection_result["insert_result"]),
+        bool(selection_result.get("news_quiz_insert_result")),
+    )
+    print_news_keyword_selection_insert_result(selection_result)
+    if args.send_telegram:
+        logger.info(
+            "telegram_send_started test_chat=%s selected_keyword=%s",
+            args.telegram_test,
+            selection_result["selected_candidate"].get("keyword", ""),
+        )
+        send_selected_news_keyword_to_telegram(
+            selection_result["selected_candidate"],
+            use_test_chat=args.telegram_test,
+        )
+        print("telegram_sent: true")
+        logger.info("telegram_send_completed")
+    return selection_result
+
+
+def run_script_generations(args, root_dir, logger, default_date=None):
+    """설명: --generate-script로 지정한 템플릿마다 스크립트를 만들어 DB content에 저장합니다.
+    입력: args는 CLI 옵션, root_dir은 프로젝트 루트 Path, logger는 로거, default_date는 --script-date가 없을 때 쓸 날짜입니다.
+    출력: 실패한 템플릿 키 리스트를 반환합니다. 한 템플릿이 실패해도 나머지는 계속 실행합니다.
+    """
+    date_text = args.script_date or default_date
+    resolve_target_date(date_text)
+    db_config = mysql_connect_kwargs()
+    llm_client = create_script_llm_client()
+    failed_templates = []
+    for template_key in args.generate_script:
+        logger.info("script_generation_started template=%s date=%s", template_key, date_text)
+        try:
+            result = run_script_generation(
+                db_config=db_config,
+                llm_client=llm_client,
+                root_dir=root_dir,
+                template_key=template_key,
+                date_text=date_text,
+                keyword=args.script_keyword,
+                model=args.script_model,
+            )
+        except (FileNotFoundError, ValueError, RuntimeError, MySQLError) as exc:
+            logger.exception("script_generation_failed template=%s", template_key)
+            print(f"error: script template={template_key}: {exc}", file=sys.stderr)
+            failed_templates.append(template_key)
+            continue
+        print(f"script template={template_key} ({len(result['script'])} chars):")
+        print(result["script"])
+        if result["db_content_updated"] is None:
+            print("db_content_updated: skipped (already set)")
+        else:
+            print(f"db_content_updated: {result['db_content_updated']}")
+        logger.info(
+            "script_generation_completed template=%s idx=%s db_content_updated=%s",
+            template_key,
+            result["idx"],
+            result["db_content_updated"],
+        )
+    return failed_templates
+
+
 def main(argv=None):
-    """설명: CLI 진입점으로 환경 로드, 키워드 추출, 출력, 선택적 텔레그램 전송을 수행합니다.
+    """설명: CLI 진입점으로 환경 로드, 키워드 선정, 선택적 텔레그램 전송, 스크립트 생성을 수행합니다.
     입력: argv는 선택 CLI 인자 리스트이며, None이면 sys.argv 값을 사용합니다.
     출력: 프로세스 종료 코드로 사용할 정수를 반환합니다.
     """
@@ -544,66 +708,37 @@ def main(argv=None):
     root_dir = Path(__file__).resolve().parent.parent
     logger = LoggerUtil(log_dir=root_dir / "logs").get_logger()
     logger.info(
-        "program_started argv=%s output_dir=%s send_telegram=%s telegram_test=%s insert_publish_content=%s insert_news_quiz=%s",
+        "program_started argv=%s output_dir=%s send_telegram=%s telegram_test=%s insert_publish_content=%s insert_news_quiz=%s generate_script=%s skip_keyword_selection=%s",
         list(cli_args),
         args.output_dir,
         args.send_telegram,
         args.telegram_test,
         args.insert_publish_content,
         args.insert_news_quiz,
+        args.generate_script,
+        args.skip_keyword_selection,
     )
 
     try:
         validate_args(args)
         load_dotenv(root_dir / ".env")
         logger.info("environment_loaded env_path=%s", root_dir / ".env")
-        validate_required_environment(REQUIRED_ENV_NAMES)
-        logger.info("environment_validated required_env_names=%s", REQUIRED_ENV_NAMES)
-        output_dir = resolve_output_dir(root_dir, args.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("output_dir_ready path=%s", output_dir)
-        llm_client = create_llm_client()
-        logger.info(
-            "llm_client_created provider=%s default_model=%s",
-            getattr(llm_client, "provider", ""),
-            getattr(llm_client, "default_model", ""),
-        )
-        candidates = suggest_news_keyword_candidates(
-            args,
-            output_dir,
-            llm_client,
-            logger=logger,
-        )
-        print_news_keyword_candidates(candidates)
-        selection_result = run_news_keyword_selection_process(
-            candidates=candidates,
-            args=args,
-            root_dir=root_dir,
-            output_dir=output_dir,
-            llm_client=llm_client,
-            insert_publish_content=args.insert_publish_content,
-            insert_news_quiz=args.insert_news_quiz,
-        )
-        logger.info(
-            "selection_completed selected_keyword=%s target_date=%s insert_count=%s news_quiz_inserted=%s",
-            selection_result["selected_candidate"].get("keyword", ""),
-            selection_result["target_date"],
-            len(selection_result["insert_result"]),
-            bool(selection_result.get("news_quiz_insert_result")),
-        )
-        print_news_keyword_selection_insert_result(selection_result)
-        if args.send_telegram:
-            logger.info(
-                "telegram_send_started test_chat=%s selected_keyword=%s",
-                args.telegram_test,
-                selection_result["selected_candidate"].get("keyword", ""),
+        required_env_names = resolve_required_env_names(args)
+        validate_required_environment(required_env_names)
+        logger.info("environment_validated required_env_names=%s", required_env_names)
+
+        selection_result = None
+        if not args.skip_keyword_selection:
+            selection_result = run_keyword_selection(args, root_dir, logger)
+
+        if args.generate_script:
+            default_date = selection_result["target_date"] if selection_result else None
+            failed_templates = run_script_generations(
+                args, root_dir, logger, default_date=default_date
             )
-            send_selected_news_keyword_to_telegram(
-                selection_result["selected_candidate"],
-                use_test_chat=args.telegram_test,
-            )
-            print("telegram_sent: true")
-            logger.info("telegram_send_completed")
+            if failed_templates:
+                logger.error("program_failed exit_code=2 failed_templates=%s", failed_templates)
+                return 2
         logger.info("program_completed exit_code=0")
         return 0
     except (FileNotFoundError, ValueError, RuntimeError, MySQLError) as exc:

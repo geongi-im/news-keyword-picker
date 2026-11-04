@@ -1,5 +1,5 @@
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -22,7 +22,6 @@ from script_generation import (
     uses_news_context,
     validate_content_length,
 )
-import script_main
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -328,41 +327,6 @@ class RetryTest(unittest.TestCase):
                     db_config={}, llm_client=llm, root_dir=ROOT_DIR, template_key="3s_quiz"
                 )
         update.assert_not_called()
-
-
-class ScriptMainTest(unittest.TestCase):
-    def test_create_script_llm_client_requests_plain_text(self):
-        client = script_main.create_script_llm_client(
-            {"GEMINI_API_KEY": "k", "LLM_MODEL": "gemini-x"}
-        )
-        self.assertEqual(client.response_mime_type, "text/plain")
-        self.assertIsNone(client.response_json_schema)
-        self.assertEqual(client.default_model, "gemini-x")
-        self.assertEqual(client.api_key, "k")
-
-    def test_main_returns_2_when_required_env_missing(self):
-        with patch.dict("os.environ", {}, clear=True), patch(
-            "script_main.load_dotenv"
-        ), redirect_stderr(StringIO()) as err:
-            code = script_main.main(["--template", "explain_child"])
-
-        self.assertEqual(code, 2)
-        self.assertIn("LLM_MODEL", err.getvalue())
-
-    def test_main_prints_result_and_returns_0(self):
-        env = {"GEMINI_API_KEY": "k", "LLM_MODEL": "m"}
-        result = {"idx": 1, "script": "본문", "db_content_updated": 1}
-        with patch.dict("os.environ", env, clear=True), patch("script_main.load_dotenv"), patch(
-            "script_main.mysql_connect_kwargs", return_value={}
-        ), patch("script_main.run_script_generation", return_value=result) as run:
-            out = StringIO()
-            with redirect_stdout(out):
-                code = script_main.main(["--template", "3s_quiz", "--keyword", "ETF"])
-
-        self.assertEqual(code, 0)
-        self.assertIn("db_content_updated: 1", out.getvalue())
-        self.assertEqual(run.call_args.kwargs["template_key"], "3s_quiz")
-        self.assertEqual(run.call_args.kwargs["keyword"], "ETF")
 
 
 if __name__ == "__main__":

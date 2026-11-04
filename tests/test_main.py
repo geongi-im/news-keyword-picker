@@ -10,11 +10,13 @@ from unittest.mock import patch
 from main import (
     NEWS_MIN_ARTICLE_COUNT_ENV,
     REQUIRED_ENV_NAMES,
+    create_script_llm_client,
     extract_news_keyword_candidates,
     format_news_keyword_candidates_message,
     format_selected_news_keyword_message,
     main as run_main,
     parse_args,
+    resolve_required_env_names,
     resolve_min_news_article_count,
     resolve_min_news_keyword_candidate_count,
     resolve_news_body_char_limit,
@@ -418,6 +420,124 @@ class MainLLMFlowTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertFalse(run_selection.call_args.kwargs["insert_publish_content"])
         self.assertTrue(run_selection.call_args.kwargs["insert_news_quiz"])
+
+    def test_parse_args_accepts_repeated_generate_script_options(self):
+        args = parse_args(
+            ["--generate-script", "explain_child", "--generate-script", "news_3s_quiz"]
+        )
+
+        self.assertEqual(args.generate_script, ["explain_child", "news_3s_quiz"])
+        self.assertFalse(args.skip_keyword_selection)
+
+    def test_validate_args_requires_generate_script_for_skip_keyword_selection(self):
+        with self.assertRaises(ValueError):
+            validate_args(parse_args(["--skip-keyword-selection"]))
+
+    def test_create_script_llm_client_requests_plain_text(self):
+        client = create_script_llm_client({"GEMINI_API_KEY": "k", "LLM_MODEL": "gemini-x"})
+
+        self.assertEqual(client.response_mime_type, "text/plain")
+        self.assertIsNone(client.response_json_schema)
+        self.assertEqual(client.default_model, "gemini-x")
+        self.assertEqual(client.api_key, "k")
+
+    def test_resolve_required_env_names_depends_on_enabled_steps(self):
+        self.assertEqual(resolve_required_env_names(parse_args([])), REQUIRED_ENV_NAMES)
+
+        script_only = parse_args(["--skip-keyword-selection", "--generate-script", "3s_quiz"])
+        self.assertEqual(resolve_required_env_names(script_only), ["LLM_MODEL", "GEMINI_API_KEY"])
+
+        both = resolve_required_env_names(parse_args(["--generate-script", "3s_quiz"]))
+        self.assertEqual(both, [*REQUIRED_ENV_NAMES, "GEMINI_API_KEY"])
+
+    def test_main_script_only_returns_2_when_script_env_missing(self):
+        with (
+            patch("main.load_dotenv"),
+            patch.dict(os.environ, {}, clear=True),
+            patch("main.run_keyword_selection") as run_selection,
+            redirect_stderr(StringIO()) as stderr,
+        ):
+            exit_code = run_main(["--skip-keyword-selection", "--generate-script", "explain_child"])
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("GEMINI_API_KEY", stderr.getvalue())
+        self.assertNotIn("TELEGRAM_BOT_TOKEN", stderr.getvalue())
+        run_selection.assert_not_called()
+
+    def test_main_script_only_runs_each_template_and_prints_result(self):
+        env = {"GEMINI_API_KEY": "k", "LLM_MODEL": "m"}
+        result = {"idx": 1, "script": "body", "db_content_updated": 1}
+        with (
+            patch("main.load_dotenv"),
+            patch.dict(os.environ, env, clear=True),
+            patch("main.mysql_connect_kwargs", return_value={}),
+            patch("main.run_script_generation", return_value=result) as run,
+            patch("main.run_keyword_selection") as run_selection,
+        ):
+            out = StringIO()
+            with redirect_stdout(out):
+                exit_code = run_main(
+                    [
+                        "--skip-keyword-selection",
+                        "--generate-script",
+                        "3s_quiz",
+                        "--generate-script",
+                        "explain_child",
+                        "--script-keyword",
+                        "ETF",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("db_content_updated: 1", out.getvalue())
+        self.assertEqual(
+            [call.kwargs["template_key"] for call in run.call_args_list],
+            ["3s_quiz", "explain_child"],
+        )
+        self.assertEqual(run.call_args.kwargs["keyword"], "ETF")
+        run_selection.assert_not_called()
+
+    def test_main_generates_scripts_with_selection_target_date(self):
+        env = {**REQUIRED_ENV_VALUES, "GEMINI_API_KEY": "k"}
+        selection_result = {"target_date": "2026-06-02"}
+        result = {"idx": 1, "script": "body", "db_content_updated": 1}
+        with (
+            patch("main.load_dotenv"),
+            patch.dict(os.environ, env, clear=True),
+            patch("main.mysql_connect_kwargs", return_value={}),
+            patch("main.run_keyword_selection", return_value=selection_result),
+            patch("main.run_script_generation", return_value=result) as run,
+            redirect_stdout(StringIO()),
+        ):
+            exit_code = run_main(["--generate-script", "explain_child"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(run.call_args.kwargs["date_text"], "2026-06-02")
+
+    def test_main_continues_other_templates_and_returns_2_when_one_fails(self):
+        env = {"GEMINI_API_KEY": "k", "LLM_MODEL": "m"}
+        result = {"idx": 2, "script": "body", "db_content_updated": 1}
+        with (
+            patch("main.load_dotenv"),
+            patch.dict(os.environ, env, clear=True),
+            patch("main.mysql_connect_kwargs", return_value={}),
+            patch("main.run_script_generation", side_effect=[ValueError("bad"), result]) as run,
+            redirect_stdout(StringIO()),
+            redirect_stderr(StringIO()) as stderr,
+        ):
+            exit_code = run_main(
+                [
+                    "--skip-keyword-selection",
+                    "--generate-script",
+                    "3s_quiz",
+                    "--generate-script",
+                    "explain_child",
+                ]
+            )
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("3s_quiz", stderr.getvalue())
 
     def test_extract_news_keyword_candidates_retries_with_injected_llm_client(self):
         articles = [

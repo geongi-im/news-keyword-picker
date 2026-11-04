@@ -198,16 +198,21 @@ INSERT INTO n8n_publish_content(category, keyword, target_date, `comment`) VALUE
 키워드 행(`n8n_publish_content`)에 대해 SNS 스크립트를 만들어 `content` 컬럼에 저장합니다. 이미지 생성과 `image_paths`는 다루지 않습니다(이미지는 cartoon-image-generator 프로젝트 담당).
 
 ```powershell
-python src/script_main.py --template explain_child
-python src/script_main.py --template news_3s_quiz --date 2026-11-04
-python src/script_main.py --template 3s_quiz --keyword 금리
+python src/main.py --skip-keyword-selection --generate-script explain_child
+python src/main.py --skip-keyword-selection --generate-script news_3s_quiz --script-date 2026-11-04
+python src/main.py --skip-keyword-selection --generate-script 3s_quiz --script-keyword 금리
+python src/main.py --send-telegram --insert-news-quiz --insert-publish-content --generate-script news_3s_quiz --generate-script explain_child
 ```
 
-- `--template`: `explain_child`(자녀에게설명하기), `3s_quiz`(3초퀴즈), `news_explain_child`, `news_3s_quiz`. 프롬프트는 `prompt/SCRIPT_*.md`입니다.
-- `--date`: 대상 행의 `target_date`(YYYY-MM-DD). 기본값은 오늘입니다.
-- `--keyword`: 키워드를 직접 지정합니다. 해당 날짜/카테고리 행이 없으면 새로 insert합니다.
-- `--model`: 모델 override입니다. 기본값은 `LLM_MODEL`입니다.
-- 스크립트 생성은 `LLM_PROVIDER`와 무관하게 Gemini API로 고정이며 `GEMINI_API_KEY`, `LLM_MODEL`, `MYSQL_*`가 필요합니다. 텔레그램 환경변수는 필요 없습니다.
+마지막 예시처럼 키워드 선정 옵션과 함께 쓰면 선정/insert 직후 같은 실행에서 스크립트까지 생성합니다(cron은 이 형태 한 줄로 충분합니다).
+
+- `--generate-script`: 템플릿 키이며 여러 번 지정할 수 있습니다. `explain_child`(자녀에게설명하기), `3s_quiz`(3초퀴즈), `news_explain_child`, `news_3s_quiz`. 프롬프트는 `prompt/SCRIPT_*.md`입니다.
+- `--script-date`: 대상 행의 `target_date`(YYYY-MM-DD). 기본값은 같은 실행의 키워드 선정 날짜이고, 선정을 건너뛰면 오늘입니다.
+- `--script-keyword`: 키워드를 직접 지정합니다. 해당 날짜/카테고리 행이 없으면 새로 insert합니다.
+- `--script-model`: 모델 override입니다. 기본값은 `LLM_MODEL`입니다.
+- `--skip-keyword-selection`: 기사 수집/키워드 선정을 건너뛰고 스크립트 생성만 합니다. 이때는 텔레그램 환경변수가 필요 없습니다.
+- 한 템플릿이 실패해도 나머지 템플릿은 계속 실행하고, 하나라도 실패하면 종료 코드 2를 반환합니다.
+- 스크립트 생성은 `LLM_PROVIDER`와 무관하게 Gemini API로 고정이며 `GEMINI_API_KEY`, `LLM_MODEL`, `MYSQL_*`가 필요합니다. 텔레그램 환경변수는 필요 없습니다(키워드 선정과 함께 실행하면 선정 단계의 환경변수도 필요합니다).
 - `news_*` 템플릿은 행의 `comment`에서 뉴스 URL을 꺼내 `mq_news_quiz`를 조회하고, 기사 제목/키워드 설명/선별 이유를 컨텍스트로 사용합니다.
 - 생성 결과가 500자 이상이면 DB에 저장하지 않고 실패합니다.
 - 대상 행의 `content`가 이미 채워져 있으면 생성하지 않고 건너뜁니다.
