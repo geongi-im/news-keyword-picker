@@ -1,6 +1,7 @@
 import html
 import http.client
 import json
+import random
 import re
 import time
 import urllib.error
@@ -348,67 +349,101 @@ def build_news_keyword_prompt_examples(
     keyword_count=NEWS_KEYWORD_COUNT,
     include_learning_content=False,
 ):
-    """Build example keyword candidate objects for the extraction prompt."""
+    """Build example keyword candidate objects for the extraction prompt.
+
+    비고: 예시는 서로 다른 유형의 한국어 키워드로 구성하고, 정답 위치(A/B)를 섞어 모델이 틀을 베끼지 않게 합니다.
+    """
     examples = [
         {
-            "keyword": "KOSPI",
+            "keyword": "코스피",
             "source_url": "https://n.news.naver.com/mnews/article/001/0000000001",
-            "reason": "The index movement can explain investor sentiment and market direction.",
+            "reason": "외국인 순매수가 이어지면서 지수가 연중 최고치를 경신한 시장 움직임을 다룬다.",
+            "keyword_description": (
+                "코스피는 국내 상장 대형주의 가격 흐름을 한 숫자로 보여 줘서 "
+                "외국인 자금이 얼마나 들어오는지 가늠하는 잣대가 돼요."
+            ),
+            "quiz": {
+                "question": "외국인 순매수로 코스피가 오를 때 더 타당한 해석은 무엇일까요?",
+                "option_a": "외국인 매수 자체가 지수를 밀어 올리므로 수급만 보면 이후 흐름까지 충분히 설명된다고 보는 해석",
+                "option_b": "수급이 지수를 밀어 올리더라도 기업 실적과 환율 전망이 뒷받침돼야 상승이 이어진다고 보는 해석",
+                "answer": "B",
+                "explanation": "수급만 보고 실적과 환율이라는 지속 조건을 놓친 해석보다 두 조건까지 함께 보는 해석이 더 정확해요.",
+            },
         },
         {
             "keyword": "ETF",
             "source_url": "https://n.news.naver.com/mnews/article/001/0000000002",
-            "reason": "Fund listing and inflow show demand for investment products.",
+            "reason": "신규 ETF 상장 직후 자금이 빠르게 유입되며 특정 테마 투자 수요가 확인됐다.",
+            "keyword_description": (
+                "ETF는 여러 종목을 묶어 주식처럼 사고파는 상품이라 "
+                "이번 상장은 개인 자금이 어디로 몰리는지 보여 주는 단서예요."
+            ),
+            "quiz": {
+                "question": "신규 ETF에 자금이 빠르게 몰릴 때 더 타당한 해석은 무엇일까요?",
+                "option_a": "특정 테마의 수요가 커졌다는 신호지만 운용 보수와 쏠림 위험까지 따져야 투자 부담을 판단할 수 있다고 보는 해석",
+                "option_b": "자금이 몰린 만큼 해당 테마 기업의 이익이 이미 늘었다는 근거로 볼 수 있어 추가 확인이 필요 없다고 보는 해석",
+                "answer": "A",
+                "explanation": "자금 유입을 기업 이익의 증거로 착각한 해석보다 수요 신호와 비용, 쏠림 위험을 함께 보는 해석이 더 적절해요.",
+            },
         },
         {
-            "keyword": "Bitcoin",
+            "keyword": "전기요금",
             "source_url": "https://n.news.naver.com/mnews/article/001/0000000003",
-            "reason": "Price movement and ETF flow reveal virtual-asset investor sentiment.",
+            "reason": "전기요금 인상으로 한국전력의 적자 부담과 가계, 기업의 비용 증가가 함께 거론된다.",
+            "keyword_description": (
+                "전기요금은 공장과 가정이 매달 내는 에너지 비용이라 "
+                "인상되면 기업의 생산 원가와 물가 부담이 함께 움직여요."
+            ),
+            "quiz": {
+                "question": "전기요금이 오를 때 더 타당한 해석은 무엇일까요?",
+                "option_a": "한국전력의 적자가 줄어드는 만큼 요금 인상의 효과는 공기업 재무 개선에 한정된다고 보는 해석",
+                "option_b": "한국전력의 적자는 줄 수 있지만 제조업 원가가 올라 제품 가격과 물가로 번질 수 있다고 보는 해석",
+                "answer": "B",
+                "explanation": "공기업 재무만 본 해석보다 원가와 물가로 번지는 간접 효과까지 함께 보는 해석이 더 적절해요.",
+            },
         },
         {
             "keyword": "HBM",
             "source_url": "https://n.news.naver.com/mnews/article/001/0000000004",
-            "reason": "AI server demand links memory supply to semiconductor earnings.",
+            "reason": "AI 서버 수요가 늘면서 HBM 공급 계약이 반도체 기업의 실적 전망을 끌어올리고 있다.",
+            "keyword_description": (
+                "HBM은 AI 반도체 옆에 붙는 고성능 메모리로, "
+                "이 제품 수요가 메모리 기업의 이익을 좌우하는 핵심 변수가 돼요."
+            ),
+            "quiz": {
+                "question": "HBM 수요가 급증할 때 메모리 기업에 대한 더 타당한 해석은 무엇일까요?",
+                "option_a": "고부가 제품 비중이 늘어 이익률이 개선될 수 있지만 증설 부담과 수요 둔화 시 재고 위험도 함께 커진다고 보는 해석",
+                "option_b": "수요가 늘었으니 증설 부담 없이 기존 설비만으로 가격 상승분이 그대로 이익으로 이어진다고 보는 해석",
+                "answer": "A",
+                "explanation": "수요 증가만 보고 증설 비용과 재고 위험을 놓친 해석보다 반대편 효과까지 함께 보는 해석이 더 정확해요.",
+            },
         },
         {
-            "keyword": "Electricity tariff",
+            "keyword": "주택공급",
             "source_url": "https://n.news.naver.com/mnews/article/001/0000000005",
-            "reason": "Tariff changes can affect household inflation and company costs.",
-        },
-        {
-            "keyword": "IPO",
-            "source_url": "https://n.news.naver.com/mnews/article/001/0000000006",
-            "reason": "Listing plans connect company financing with stock-market interest.",
-        },
-        {
-            "keyword": "Housing price",
-            "source_url": "https://n.news.naver.com/mnews/article/001/0000000007",
-            "reason": "Housing price changes explain real-estate supply and buyer burden.",
-        },
-        {
-            "keyword": "Semiconductor",
-            "source_url": "https://n.news.naver.com/mnews/article/001/0000000008",
-            "reason": "Export and investment flows connect the sector to domestic industry cycles.",
+            "reason": "정부가 수도권 주택 공급 확대 방안을 내놓으며 집값 안정 효과를 두고 논의가 이어진다.",
+            "keyword_description": (
+                "주택공급은 새로 지어 시장에 내놓는 집의 양이라 "
+                "늘어나는 속도에 따라 집값과 전세 부담이 달라질 수 있어요."
+            ),
+            "quiz": {
+                "question": "주택 공급 확대 계획이 발표될 때 더 타당한 해석은 무엇일까요?",
+                "option_a": "발표 직후 공급이 곧바로 늘어 집값이 내려가므로 단기 시장 반응이 가장 중요하다고 보는 해석",
+                "option_b": "입주까지 시간이 걸려 단기에는 기대 심리가 먼저 움직이고 실제 가격 효과는 공급 속도에 달렸다고 보는 해석",
+                "answer": "B",
+                "explanation": "발표와 실제 입주 시점의 차이를 놓친 해석보다 기대 심리와 공급 속도를 구분하는 해석이 더 적절해요.",
+            },
         },
     ][:keyword_count]
 
-    if not include_learning_content:
+    if include_learning_content:
         return examples
 
-    for example in examples:
-        keyword = example["keyword"]
-        example["keyword_description"] = (
-            f"{keyword}은 이번 기사에서 시장 참여자들이 어떤 비용, 수요, 투자 흐름을 "
-            "보고 판단해야 하는지 알려주는 핵심 단서예요."
-        )
-        example["quiz"] = {
-            "question": f"{keyword} 이슈를 해석할 때 더 타당한 관점은 무엇일까요?",
-            "option_a": "가격, 수요, 자금 흐름이 기업 실적이나 소비자 부담으로 이어지는지를 함께 보는 관점",
-            "option_b": "단기 관심이 커져도 실제 비용 구조보다는 투자 심리 변화에만 의미가 있다고 보는 관점",
-            "answer": "A",
-            "explanation": "B도 일부 맞아 보이지만 비용과 수요까지 함께 봐야 흐름을 더 정확히 이해할 수 있어요.",
-        }
-    return examples
+    return [
+        {key: example[key] for key in ("keyword", "source_url", "reason")}
+        for example in examples
+    ]
+
 
 def build_news_keyword_prompt(
     articles,
@@ -449,6 +484,8 @@ def build_news_keyword_prompt(
 - At least one option should include a second-order effect or tradeoff, such as cost burden, margin pressure, investment timing, consumer demand, regional employment, inflation expectations, exchange-rate sensitivity, or supply-chain risk.
 - answer must be exactly "A" or "B".
 - explanation must be one Korean sentence in friendly teacher-like 해요체 explaining why the answer is correct and why the other option is less appropriate.
+- explanation must not refer to the options by the labels A or B, because the option order is shuffled after generation; describe the options by their content instead.
+- keyword_description and quiz must stay grounded in the provided title and body: do not add company names, numbers, dates, or causal claims that they do not support. General economic mechanisms are allowed, but they must not contradict the article.
 """
 
     return f"""You extract image-generation source keywords from Korean economy newspaper front-page articles.
@@ -475,7 +512,7 @@ Rules:
 - Prefer candidates like stock indexes, ETFs, IPOs, housing supply rules, virtual-asset accounts, tax revenue, nominal growth, and semiconductor market movement.
 - Keep Korean text as normal readable Korean. Do not escape Korean characters as \\uXXXX.
 - Do not add numbering, bullets, explanations, quotes, or markdown.
-- Each keyword must be a concise Korean or common English economic term.
+- Each keyword must be a concise economic term written exactly as it appears in the article text, either a Korean term or an acronym such as ETF, IPO, or HBM. Do not translate Korean terms into English.
 - Prefer topics that can become educational economy image content.
 - Avoid generic words like economy, market, company, government, issue, news.
 {learning_rules}
@@ -516,15 +553,40 @@ def parse_news_keyword_candidates(output_text, keyword_count=NEWS_KEYWORD_COUNT)
     return unique_candidates
 
 
+QUIZ_OPTION_LABEL_PATTERN = re.compile(r"(?<![A-Za-z0-9])[AB](?![A-Za-z0-9])")
+
+
+def maybe_swap_quiz_options(quiz, rng=None):
+    """퀴즈 보기 A/B를 절반 확률로 맞바꾸고 정답 표기를 함께 뒤집습니다.
+
+    입력: quiz는 정규화된 퀴즈 딕셔너리, rng는 random() 메서드를 가진 난수 객체(기본은 random 모듈)입니다.
+    출력: 새 퀴즈 딕셔너리를 반환합니다. 원본은 바꾸지 않습니다.
+    비고: LLM이 정답을 A로 몰아서 내는 편향을 코드로 상쇄합니다.
+    해설이 A/B 라벨을 직접 언급하면 순서를 바꿀 때 해설이 틀어지므로 그대로 둡니다.
+    """
+    rng = rng or random
+    if rng.random() >= 0.5:
+        return quiz
+    if QUIZ_OPTION_LABEL_PATTERN.search(quiz.get("explanation", "")):
+        return quiz
+    swapped = dict(quiz)
+    swapped["option_a"] = quiz["option_b"]
+    swapped["option_b"] = quiz["option_a"]
+    swapped["answer"] = "B" if quiz["answer"] == "A" else "A"
+    return swapped
+
+
 def filter_news_keyword_candidates(
     candidates,
     articles,
     keyword_count=NEWS_KEYWORD_COUNT,
     require_learning_content=False,
+    rng=None,
 ):
     """후보가 실제 수집된 기사 URL과 기사 텍스트로 뒷받침되는지 검증하고 필터를 적용합니다.
 
     입력: candidates는 LLM 후보 목록, articles는 title/body를 가진 원본 기사 목록, keyword_count는 최대 후보 개수입니다.
+    require_learning_content가 True이면 완성된 설명/퀴즈가 있는 후보만 남기고 퀴즈 보기 순서를 무작위로 섞습니다. rng는 테스트용 난수 객체입니다.
     출력: source_title과 정제된 reason을 포함한 후보 딕셔너리 목록을 반환합니다.
     비고: 키워드는 제목에 없어도 수집한 본문에 등장하면 허용합니다.
     """
@@ -547,6 +609,9 @@ def filter_news_keyword_candidates(
             continue
 
         filtered_candidate = dict(candidate)
+        if require_learning_content:
+            quiz = normalize_candidate_learning_content(candidate)["quiz"]
+            filtered_candidate["quiz"] = maybe_swap_quiz_options(quiz, rng)
         filtered_candidate["source_title"] = article["title"]
         if article.get("source_name"):
             filtered_candidate["source_name"] = article["source_name"]

@@ -1,4 +1,5 @@
 import json
+import re
 import unittest
 import urllib.error
 from unittest.mock import patch
@@ -9,6 +10,7 @@ from news_keyword import (
     fetch_html,
     fetch_naver_newspaper_front_page_articles,
     build_news_keyword_prompt,
+    build_news_keyword_prompt_examples,
     build_news_keyword_response_json_schema,
     count_articles_with_body,
     extract_naver_article_body,
@@ -16,8 +18,22 @@ from news_keyword import (
     filter_news_keyword_candidates,
     has_complete_candidate_learning_content,
     is_keyword_supported_by_article,
+    maybe_swap_quiz_options,
     parse_news_keyword_candidates,
 )
+
+
+QUIZ_LABEL_PATTERN = re.compile(r"(?<![A-Za-z0-9])[AB](?![A-Za-z0-9])")
+
+
+class FakeRandom:
+    """random() 반환값을 고정하는 테스트용 난수 객체입니다."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def random(self):
+        return self.value
 
 
 ARTICLE_PAGE_HTML = """
@@ -452,6 +468,126 @@ class NewsKeywordParsingTest(unittest.TestCase):
         self.assertIn("second-order effect or tradeoff", prompt)
         self.assertEqual(schema["minItems"], NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT)
         self.assertIn("quiz", schema["items"]["required"])
+
+
+    def test_maybe_swap_quiz_options_swaps_options_and_flips_answer(self):
+        quiz = {
+            "question": "q",
+            "option_a": "right",
+            "option_b": "wrong",
+            "answer": "A",
+            "explanation": "정답 보기가 비용 효과까지 설명해서 더 적절해요.",
+        }
+
+        swapped = maybe_swap_quiz_options(quiz, rng=FakeRandom(0.0))
+
+        self.assertEqual(swapped["option_a"], "wrong")
+        self.assertEqual(swapped["option_b"], "right")
+        self.assertEqual(swapped["answer"], "B")
+        self.assertEqual(quiz["option_a"], "right")
+        self.assertEqual(quiz["answer"], "A")
+
+    def test_maybe_swap_quiz_options_keeps_order_when_random_is_high(self):
+        quiz = {
+            "question": "q",
+            "option_a": "right",
+            "option_b": "wrong",
+            "answer": "A",
+            "explanation": "정답 보기가 더 적절해요.",
+        }
+
+        self.assertEqual(maybe_swap_quiz_options(quiz, rng=FakeRandom(0.9)), quiz)
+
+    def test_maybe_swap_quiz_options_keeps_order_when_explanation_names_labels(self):
+        quiz = {
+            "question": "q",
+            "option_a": "right",
+            "option_b": "wrong",
+            "answer": "A",
+            "explanation": "B는 단기만 봐서 A가 더 적절해요.",
+        }
+
+        self.assertEqual(maybe_swap_quiz_options(quiz, rng=FakeRandom(0.0)), quiz)
+
+    def test_filter_candidates_shuffles_quiz_only_when_learning_content_required(self):
+        articles = [{"title": "ETF 신규 상장", "url": "https://example.com/a"}]
+        candidates = [
+            {
+                "keyword": "ETF",
+                "source_url": "https://example.com/a",
+                "reason": "model",
+                "keyword_description": "ETF desc",
+                "quiz": {
+                    "question": "ETF question",
+                    "option_a": "right",
+                    "option_b": "wrong",
+                    "answer": "A",
+                    "explanation": "정답 보기가 더 적절해요.",
+                },
+            }
+        ]
+
+        shuffled = filter_news_keyword_candidates(
+            candidates,
+            articles,
+            keyword_count=1,
+            require_learning_content=True,
+            rng=FakeRandom(0.0),
+        )
+        untouched = filter_news_keyword_candidates(
+            candidates,
+            articles,
+            keyword_count=1,
+            rng=FakeRandom(0.0),
+        )
+
+        self.assertEqual(shuffled[0]["quiz"]["option_a"], "wrong")
+        self.assertEqual(shuffled[0]["quiz"]["answer"], "B")
+        self.assertEqual(untouched[0]["quiz"]["option_a"], "right")
+        self.assertEqual(untouched[0]["quiz"]["answer"], "A")
+        self.assertEqual(candidates[0]["quiz"]["option_a"], "right")
+
+    def test_prompt_examples_use_korean_keywords_and_mixed_answers(self):
+        prompt = build_news_keyword_prompt(
+            [{"title": "ETF 신규 상장", "url": "https://example.com/a"}],
+            keyword_count=NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT,
+            include_learning_content=True,
+        )
+        examples = build_news_keyword_prompt_examples(
+            keyword_count=NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT,
+            include_learning_content=True,
+        )
+
+        self.assertEqual(len(examples), NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT)
+        self.assertEqual({example["quiz"]["answer"] for example in examples}, {"A", "B"})
+        self.assertNotIn("Electricity tariff", prompt)
+        self.assertNotIn("Housing price", prompt)
+        for example in examples:
+            self.assertTrue(has_complete_candidate_learning_content(example))
+            self.assertIsNone(
+                QUIZ_LABEL_PATTERN.search(example["quiz"]["explanation"]),
+                example["keyword"],
+            )
+            description = example["keyword_description"].replace(" ", "")
+            self.assertTrue(45 <= len(description) <= 75, (example["keyword"], len(description)))
+
+    def test_prompt_examples_without_learning_content_have_only_base_fields(self):
+        examples = build_news_keyword_prompt_examples(keyword_count=3)
+
+        self.assertEqual(len(examples), 3)
+        for example in examples:
+            self.assertEqual(set(example), {"keyword", "source_url", "reason"})
+
+    def test_prompt_requires_grounded_quiz_and_label_free_explanation(self):
+        prompt = build_news_keyword_prompt(
+            [{"title": "ETF 신규 상장", "url": "https://example.com/a"}],
+            keyword_count=NEWS_KEYWORD_LEARNING_CANDIDATE_COUNT,
+            include_learning_content=True,
+        )
+
+        self.assertIn("keyword_description and quiz must stay grounded", prompt)
+        self.assertIn("must not refer to the options by the labels A or B", prompt)
+        self.assertIn("Do not translate Korean terms into English", prompt)
 
 
 if __name__ == "__main__":
