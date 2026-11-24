@@ -466,7 +466,7 @@ class MainLLMFlowTest(unittest.TestCase):
 
     def test_main_script_only_runs_each_template_and_prints_result(self):
         env = {"GEMINI_API_KEY": "k", "LLM_MODEL": "m"}
-        result = {"idx": 1, "script": "body", "db_content_updated": 1}
+        result = {"idx": 1, "script": "body", "comment": "정답: A) ETF", "db_content_updated": 1}
         with (
             patch("main.load_dotenv"),
             patch.dict(os.environ, env, clear=True),
@@ -490,6 +490,7 @@ class MainLLMFlowTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertIn("db_content_updated: 1", out.getvalue())
+        self.assertIn("comment:\n정답: A) ETF", out.getvalue())
         self.assertEqual(
             [call.kwargs["template_key"] for call in run.call_args_list],
             ["3s_quiz", "explain_child"],

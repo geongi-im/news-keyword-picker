@@ -216,3 +216,5 @@ python src/main.py --send-telegram --insert-news-quiz --insert-publish-content -
 - `news_*` 템플릿은 행의 `comment`에서 뉴스 URL을 꺼내 `mq_news_quiz`를 조회하고, 기사 제목/키워드 설명/선별 이유를 컨텍스트로 사용합니다.
 - 생성 결과가 500자 이상이면 DB에 저장하지 않고 실패합니다.
 - 대상 행의 `content`가 이미 채워져 있으면 생성하지 않고 건너뜁니다.
+- 3초퀴즈 계열(`3s_quiz`, `news_3s_quiz`)은 생성 결과를 `정답:` 줄 기준으로 나눠 저장합니다. 정답과 해설은 `content`에서 빼고 `comment` 앞에 붙입니다(정답, 해설, 기존 뉴스 URL 순서). 훅, 문제, 보기, 유도 문장, CTA는 `content`에 남습니다. n8n이 `comment`를 Threads 댓글로 올리므로 정답이 댓글로 공개됩니다. `content`와 `comment`는 UPDATE 한 번으로 함께 저장합니다.
+- 재생성하려면 대상 행의 `content`를 비우고 다시 실행합니다. `comment`가 이전 생성의 `정답:` 줄로 시작하면 그 정답/해설 블록을 떼어내고(처음 나오는 URL 줄부터를 원래 값으로 봄) 새 정답으로 바꾸므로, 정답이 중복으로 쌓이지 않습니다.

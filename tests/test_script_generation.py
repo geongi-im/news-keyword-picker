@@ -8,6 +8,7 @@ from script_generation import (
     SCRIPT_PROMPT_FILES,
     build_news_context_text,
     build_news_script_prompt,
+    build_publish_texts,
     build_script_prompt,
     clean_script_text,
     extract_news_source_url,
@@ -18,6 +19,8 @@ from script_generation import (
     resolve_target_date,
     resolve_template_category,
     run_script_generation,
+    split_quiz_answer,
+    strip_previous_quiz_answer,
     update_generated_script_content,
     uses_news_context,
     validate_content_length,
@@ -168,7 +171,9 @@ class RunScriptGenerationTest(unittest.TestCase):
         ), patch(
             f"{module}.fetch_news_quiz_by_source_url",
             return_value={"mq_title": "제목", "mq_keyword": "관세"},
-        ) as news, patch(f"{module}.update_content_by_idx", return_value=1) as update:
+        ) as news, patch(f"{module}.update_content_by_idx", return_value=1) as update, patch(
+            f"{module}.update_content_and_comment_by_idx", return_value=1
+        ) as update_both:
             with redirect_stdout(StringIO()):
                 result = run_script_generation(
                     db_config={},
@@ -178,6 +183,7 @@ class RunScriptGenerationTest(unittest.TestCase):
                     keyword=keyword,
                     model="m",
                 )
+        self.update_both = update_both
         return result, news, update
 
     def test_generates_and_saves_for_plain_template(self):
@@ -186,8 +192,11 @@ class RunScriptGenerationTest(unittest.TestCase):
 
         result, news, update = self.run_flow("explain_child", row, llm)
 
-        self.assertEqual(result, {"idx": 7, "script": explain_script(), "db_content_updated": 1})
+        self.assertEqual(
+            result, {"idx": 7, "script": explain_script(), "comment": None, "db_content_updated": 1}
+        )
         update.assert_called_once_with({}, 7, explain_script())
+        self.update_both.assert_not_called()
         news.assert_not_called()
         self.assertEqual(llm.calls[0]["model"], "m")
         self.assertIn("금리", llm.calls[0]["prompt"])
@@ -201,7 +210,12 @@ class RunScriptGenerationTest(unittest.TestCase):
         news.assert_called_once_with({}, "https://n.news/1")
         self.assertIn("<KEYWORD>\n관세\n</KEYWORD>", llm.calls[0]["prompt"])
         self.assertIn("뉴스기사제목: 제목", llm.calls[0]["prompt"])
-        update.assert_called_once_with({}, 8, quiz_script("관세", ("관세", "환율", "기준금리", "무역수지")))
+        content, answer = split_quiz_answer(quiz_script("관세", ("관세", "환율", "기준금리", "무역수지")))
+        expected_comment = f"{answer}\n\nhttps://n.news/1"
+        update.assert_not_called()
+        self.update_both.assert_called_once_with({}, 8, content, expected_comment)
+        self.assertEqual(result["script"], content)
+        self.assertEqual(result["comment"], expected_comment)
 
     def test_skips_when_content_already_set(self):
         llm = FakeLLM("새 스크립트")
@@ -223,7 +237,9 @@ class RunScriptGenerationTest(unittest.TestCase):
         )
 
         self.assertEqual(result["idx"], 3)
-        update.assert_called_once_with({}, 3, quiz_script("ETF", ("ETF", "채권", "예금", "보험")))
+        content, answer = split_quiz_answer(quiz_script("ETF", ("ETF", "채권", "예금", "보험")))
+        update.assert_not_called()
+        self.update_both.assert_called_once_with({}, 3, content, answer)
 
     def test_too_long_response_does_not_write_db(self):
         llm = FakeLLM("가" * 600)
@@ -237,6 +253,80 @@ class RunScriptGenerationTest(unittest.TestCase):
             update_generated_script_content({}, "  ", {"idx": 1})
         with self.assertRaises(ValueError):
             update_generated_script_content({}, "가" * 500, {"idx": 1})
+
+
+class QuizAnswerSplitTest(unittest.TestCase):
+    def test_moves_answer_and_explanation_out_of_body_and_keeps_cta(self):
+        content, answer = split_quiz_answer(quiz_script())
+
+        self.assertEqual(answer, "정답: B) 환율\n\n서로 다른 돈을 바꾸는 비율이에요.")
+        self.assertNotIn("정답:", content)
+        self.assertNotIn("서로 다른 돈을 바꾸는 비율이에요.", content)
+        self.assertTrue(content.startswith("뉴스에서 자주 보이죠?"))
+        self.assertIn("D) 무역수지\n\n헷갈렸다면 저장", content)
+        self.assertTrue(content.endswith(f"헷갈렸다면 저장 {PIN}"))
+
+    def test_without_cta_everything_after_answer_goes_to_answer(self):
+        script = quiz_script().replace(f"\n\n헷갈렸다면 저장 {PIN}", "")
+
+        content, answer = split_quiz_answer(script)
+
+        self.assertTrue(content.endswith("D) 무역수지"))
+        self.assertTrue(answer.endswith("비율이에요."))
+
+    def test_missing_answer_line_raises(self):
+        with self.assertRaisesRegex(ValueError, "정답:"):
+            split_quiz_answer("Q) 문제\nA) 가")
+
+    def test_build_publish_texts_puts_answer_before_existing_comment(self):
+        content, comment = build_publish_texts("news_3s_quiz", quiz_script(), " https://n.news/1 ")
+
+        self.assertNotIn("정답:", content)
+        self.assertTrue(comment.startswith("정답: B) 환율\n\n서로 다른"))
+        self.assertTrue(comment.endswith("\n\nhttps://n.news/1"))
+        self.assertEqual(extract_news_source_url(comment), "https://n.news/1")
+
+    def test_build_publish_texts_without_existing_comment(self):
+        _content, comment = build_publish_texts("3s_quiz", quiz_script(), None)
+
+        self.assertEqual(comment, "정답: B) 환율\n\n서로 다른 돈을 바꾸는 비율이에요.")
+
+    def test_strip_previous_quiz_answer_keeps_plain_comment(self):
+        self.assertEqual(strip_previous_quiz_answer(" https://n.news/1 "), "https://n.news/1")
+        self.assertEqual(strip_previous_quiz_answer(None), "")
+        self.assertEqual(strip_previous_quiz_answer("메모\nhttps://n.news/1"), "메모\nhttps://n.news/1")
+
+    def test_strip_previous_quiz_answer_removes_old_answer_block(self):
+        old_comment = "정답: A) 금리\n\n돈을 빌린 값이에요.\n\nhttps://n.news/1"
+        self.assertEqual(strip_previous_quiz_answer(old_comment), "https://n.news/1")
+        self.assertEqual(strip_previous_quiz_answer("정답: A) 금리\n\n돈을 빌린 값이에요."), "")
+
+    def test_regenerate_replaces_old_answer_without_duplicating(self):
+        _content, first = build_publish_texts("news_3s_quiz", quiz_script(), "https://n.news/1")
+        _content, second = build_publish_texts("news_3s_quiz", quiz_script(), first)
+
+        self.assertEqual(second, first)
+        self.assertEqual(second.count("정답:"), 1)
+
+        new_script = quiz_script("기준금리", ("물가상승률", "환율", "기준금리", "무역수지"))
+        _content, replaced = build_publish_texts("news_3s_quiz", new_script, first)
+
+        self.assertTrue(replaced.startswith("정답: C) 기준금리\n\n"))
+        self.assertNotIn("정답: B) 환율", replaced)
+        self.assertTrue(replaced.endswith("\n\nhttps://n.news/1"))
+
+    def test_regenerate_without_url_replaces_whole_comment(self):
+        _content, first = build_publish_texts("3s_quiz", quiz_script(), None)
+        _content, second = build_publish_texts("3s_quiz", quiz_script(), first)
+
+        self.assertEqual(second, first)
+
+    def test_build_publish_texts_leaves_explain_templates_unchanged(self):
+        for key in ("explain_child", "news_explain_child"):
+            self.assertEqual(
+                build_publish_texts(key, explain_script(), "https://n.news/1"),
+                (explain_script(), None),
+            )
 
 
 class ScriptProblemsTest(unittest.TestCase):
@@ -321,12 +411,15 @@ class RetryTest(unittest.TestCase):
         llm = self.SequenceLLM(["엉터리", "엉터리"])
         with patch("script_generation.fetch_publish_content_by_date", return_value=row), patch(
             "script_generation.update_content_by_idx"
-        ) as update, redirect_stdout(StringIO()):
+        ) as update, patch(
+            "script_generation.update_content_and_comment_by_idx"
+        ) as update_both, redirect_stdout(StringIO()):
             with self.assertRaises(ValueError):
                 run_script_generation(
                     db_config={}, llm_client=llm, root_dir=ROOT_DIR, template_key="3s_quiz"
                 )
         update.assert_not_called()
+        update_both.assert_not_called()
 
 
 if __name__ == "__main__":

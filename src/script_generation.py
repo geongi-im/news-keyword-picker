@@ -19,6 +19,9 @@ SCRIPT_PROMPT_FILES = {
 
 NEWS_CONTEXT_TEMPLATES = frozenset({"news_explain_child", "news_3s_quiz"})
 
+# 정답/해설을 본문에서 떼어 comment(Threads 댓글)로 옮기는 퀴즈 템플릿입니다.
+ANSWER_IN_COMMENT_TEMPLATES = frozenset({"3s_quiz", "news_3s_quiz"})
+
 TEMPLATE_CATEGORIES = {
     "3s_quiz": "3초퀴즈",
     "explain_child": "자녀에게설명하기",
@@ -74,6 +77,13 @@ VALUES (%(category)s, %(keyword)s, %(target_date)s)
 UPDATE_CONTENT_BY_IDX_QUERY = """
 UPDATE n8n_publish_content
 SET content = %(content)s
+WHERE idx = %(idx)s
+"""
+
+UPDATE_CONTENT_AND_COMMENT_BY_IDX_QUERY = """
+UPDATE n8n_publish_content
+SET content = %(content)s,
+    `comment` = %(comment)s
 WHERE idx = %(idx)s
 """
 
@@ -475,6 +485,101 @@ def update_content_by_idx(db_config, idx, content):
     return result["affected_rows"]
 
 
+def update_content_and_comment_by_idx(db_config, idx, content, comment):
+    """설명: idx가 일치하는 행의 content와 comment 필드를 한 번에 갱신합니다.
+    입력: db_config는 MySQL 접속 설정, idx는 대상 기본키, content는 본문, comment는 댓글 텍스트입니다.
+    출력: 갱신된 행 수를 반환합니다.
+    """
+    result = execute_write(
+        db_config,
+        UPDATE_CONTENT_AND_COMMENT_BY_IDX_QUERY,
+        {"idx": idx, "content": content, "comment": comment},
+    )
+    return result["affected_rows"]
+
+
+def moves_answer_to_comment(template_key):
+    """설명: 템플릿이 정답/해설을 comment로 옮기는 퀴즈 템플릿인지 확인합니다.
+    입력: template_key는 템플릿 키 문자열입니다.
+    출력: 3초퀴즈 계열 템플릿이면 True를 반환합니다.
+    """
+    return template_key in ANSWER_IN_COMMENT_TEMPLATES
+
+
+def split_quiz_answer(script_text):
+    """설명: 퀴즈 스크립트를 본문과 정답 영역으로 나눕니다.
+    정답 영역은 '정답:' 줄부터 CTA 줄 직전까지(정답 + 해설)이고, CTA 줄부터는 본문에 남깁니다.
+    입력: script_text는 검증을 통과한 퀴즈 스크립트입니다.
+    출력: (본문, 정답 영역) 튜플을 반환하고, 정답 줄이 없으면 ValueError를 발생시킵니다.
+    """
+    lines = script_text.splitlines()
+    answer_index = next(
+        (index for index, line in enumerate(lines) if ANSWER_LINE_PATTERN.match(line.strip())),
+        None,
+    )
+    if answer_index is None:
+        raise ValueError("Answer line starting with '정답:' is missing.")
+
+    cta_index = next(
+        (
+            index
+            for index in range(answer_index + 1, len(lines))
+            if any(phrase in lines[index] for phrase in CTA_PHRASES)
+        ),
+        len(lines),
+    )
+    head = "\n".join(lines[:answer_index]).strip()
+    answer = "\n".join(lines[answer_index:cta_index]).strip()
+    tail = "\n".join(lines[cta_index:]).strip()
+    content = "\n\n".join(part for part in (head, tail) if part)
+    return content, answer
+
+
+def strip_previous_quiz_answer(comment):
+    """설명: 이전 생성에서 comment 앞에 붙인 정답/해설 블록을 떼어내고 원래 comment만 남깁니다.
+    comment의 첫 줄이 '정답:' 줄이면 이전 생성 결과로 보고, 그 뒤 처음 나오는 URL 줄부터를 원래 값으로 봅니다.
+    URL 줄이 없으면(뉴스 URL 없이 만든 행) 전체를 이전 정답 블록으로 보고 빈 문자열을 반환합니다.
+    입력: comment는 행의 기존 comment 값입니다.
+    출력: 정답 블록을 뺀 원래 comment 문자열을 반환합니다.
+    """
+    lines = str(comment or "").strip().splitlines()
+    if not lines or not ANSWER_LINE_PATTERN.match(lines[0].strip()):
+        return "\n".join(lines).strip()
+
+    source_index = next(
+        (
+            index
+            for index in range(1, len(lines))
+            if NEWS_URL_PATTERN.search(lines[index]) or lines[index].strip().startswith("www.")
+        ),
+        len(lines),
+    )
+    return "\n".join(lines[source_index:]).strip()
+
+
+def build_quiz_comment(answer_text, existing_comment):
+    """설명: 정답 영역 뒤에 원래 comment(뉴스 URL 등)를 붙여 댓글 텍스트를 만듭니다.
+    재생성이라 기존 comment에 이전 정답 블록이 남아 있으면 떼어내고 새 정답으로 바꿉니다.
+    입력: answer_text는 정답/해설 텍스트, existing_comment는 행의 기존 comment 값입니다.
+    출력: 정답, 해설, 원래 comment 순서의 댓글 문자열을 반환합니다.
+    """
+    source = strip_previous_quiz_answer(existing_comment)
+    if not source:
+        return answer_text
+    return f"{answer_text}\n\n{source}"
+
+
+def build_publish_texts(template_key, script_text, existing_comment):
+    """설명: 생성된 스크립트를 DB에 저장할 content와 comment로 변환합니다.
+    입력: template_key는 템플릿 키, script_text는 검증된 스크립트, existing_comment는 행의 기존 comment입니다.
+    출력: (content, comment) 튜플을 반환합니다. comment를 바꾸지 않는 템플릿이면 comment는 None입니다.
+    """
+    if not moves_answer_to_comment(template_key):
+        return script_text, None
+    content, answer_text = split_quiz_answer(script_text)
+    return content, build_quiz_comment(answer_text, existing_comment)
+
+
 def print_target_row_status(target_row):
     """설명: 대상 DB row의 작업 상태를 콘솔에 출력합니다.
     입력: target_row는 n8n_publish_content row 딕셔너리입니다.
@@ -588,16 +693,18 @@ def generate_script_for_row(db_config, llm_client, root_dir, template_key, targe
     )
 
 
-def update_generated_script_content(db_config, script_text, target_row):
-    """설명: 생성된 스크립트를 검증한 뒤 DB content 필드에 저장합니다.
-    입력: db_config는 MySQL 접속 설정, script_text는 생성된 스크립트, target_row는 idx를 가진 대상 row입니다.
+def update_generated_script_content(db_config, script_text, target_row, comment=None):
+    """설명: 생성된 스크립트를 검증한 뒤 DB content 필드에 저장합니다. comment가 있으면 함께 저장합니다.
+    입력: db_config는 MySQL 접속 설정, script_text는 본문, target_row는 idx를 가진 대상 row, comment는 함께 저장할 댓글 텍스트입니다.
     출력: 갱신된 행 수를 반환합니다.
     """
     text = (script_text or "").strip()
     if not text:
         raise ValueError("Script text is empty.")
     validate_content_length(text)
-    return update_content_by_idx(db_config, target_row["idx"], text)
+    if comment is None:
+        return update_content_by_idx(db_config, target_row["idx"], text)
+    return update_content_and_comment_by_idx(db_config, target_row["idx"], text, comment)
 
 
 def run_script_generation(
@@ -611,7 +718,8 @@ def run_script_generation(
 ):
     """설명: 키워드 행을 찾아 스크립트를 만들고 DB content에 저장하는 전체 흐름입니다.
     입력: db_config는 MySQL 접속 설정, llm_client는 LLM 클라이언트, root_dir은 프로젝트 루트, template_key는 템플릿 키, date_text/keyword는 대상 선택 조건, model은 모델명 override입니다.
-    출력: idx, script, db_content_updated(갱신 행 수 또는 None)를 담은 딕셔너리를 반환합니다. content가 이미 있으면 생성하지 않고 기존 값을 반환합니다.
+    출력: idx, script(content에 저장한 본문), comment(새로 저장한 댓글 또는 None), db_content_updated(갱신 행 수 또는 None)를 담은 딕셔너리를 반환합니다.
+    content가 이미 있으면 생성하지 않고 기존 값을 반환합니다.
     """
     keyword = (keyword or "").strip() or None
     if keyword:
@@ -624,15 +732,22 @@ def run_script_generation(
         return {
             "idx": target_row["idx"],
             "script": str(target_row["content"]).strip(),
+            "comment": None,
             "db_content_updated": None,
         }
 
     script_text = generate_script_for_row(
         db_config, llm_client, root_dir, template_key, target_row, model=model
     )
-    updated_rows = update_generated_script_content(db_config, script_text, target_row)
+    content_text, comment_text = build_publish_texts(
+        template_key, script_text, target_row.get("comment")
+    )
+    updated_rows = update_generated_script_content(
+        db_config, content_text, target_row, comment=comment_text
+    )
     return {
         "idx": target_row["idx"],
-        "script": script_text,
+        "script": content_text,
+        "comment": comment_text,
         "db_content_updated": updated_rows,
     }

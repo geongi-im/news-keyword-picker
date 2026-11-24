@@ -685,6 +685,9 @@ def run_script_generations(args, root_dir, logger, default_date=None):
             continue
         print(f"script template={template_key} ({len(result['script'])} chars):")
         print(result["script"])
+        if result.get("comment"):
+            print("comment:")
+            print(result["comment"])
         if result["db_content_updated"] is None:
             print("db_content_updated: skipped (already set)")
         else:
